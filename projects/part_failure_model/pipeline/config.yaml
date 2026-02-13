@@ -1,0 +1,42 @@
+# Per-step config (step_id must match pipeline.yaml step ids)
+# Framework merges steps[step_id] with environments[env][step_id] and injects into context.config
+# Optional: tracking_backend: noop | local | vertex
+
+steps:
+  preprocess:
+    train_path: data/train.csv
+    test_size: 0.2
+    random_state: 42
+  train:
+    n_estimators: 100
+    max_depth: 10
+    random_state: 42
+  inference:
+    inference_path: data/inference.csv
+  data_drift:
+    reference_artifact: train_data
+    current_data_path: data/production_sample.csv
+  model_monitor:
+    validation_path: data/validation_latest.csv
+
+# Env overrides per step (--env dev|qa|prod)
+environments:
+  dev:
+    preprocess:
+      train_path: data/train.csv
+    train:
+      n_estimators: 50
+      max_depth: 5
+    inference:
+      inference_path: data/inference.csv
+  qa:
+    preprocess:
+      train_path: gs://bucket/qa/train.csv
+    train:
+      n_estimators: 100
+  prod:
+    preprocess:
+      train_path: gs://bucket/prod/train.csv
+    train:
+      n_estimators: 200
+      max_depth: 15

@@ -1,0 +1,2 @@
+# Base dependencies for MLOps Framework
+pyyaml>=5.4.1

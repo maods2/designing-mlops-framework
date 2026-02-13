@@ -1,0 +1,11 @@
+# Part-failure classification project - standalone template
+# Local: pip install -e ../../mlops_framework  (from ml-platform-imp root)
+# PyPI: pip install mlops-framework
+mlops-framework>=0.1.0
+pandas>=1.0.0
+scikit-learn>=1.0.0
+numpy>=1.20.0
+pyyaml>=5.4.0
+
+# Testing
+pytest>=7.0.0

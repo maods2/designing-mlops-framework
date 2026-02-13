@@ -1,0 +1,35 @@
+# Part-failure classification pipeline DAG definition
+# Used by compiler to generate Airflow DAG and by CLI for step discovery
+
+pipeline:
+  name: part_failure_pipeline
+
+steps:
+  - id: preprocess
+    class: steps.preprocess.PartFailurePreprocess
+    inputs: []
+    outputs: [train_data]
+
+  - id: train
+    class: steps.train.PartFailureTrain
+    depends_on: [preprocess]
+    inputs: [train_data]
+    outputs: [model]
+
+  - id: inference
+    class: steps.inference.PartFailureInference
+    depends_on: [train]
+    inputs: [model]
+    outputs: [predictions]
+
+  - id: data_drift
+    class: steps.data_drift.PartFailureDataDrift
+    depends_on: [preprocess]
+    inputs: [train_data]
+    outputs: [drift_report]
+
+  - id: model_monitor
+    class: steps.model_monitor.PartFailureModelMonitor
+    depends_on: [train]
+    inputs: [model]
+    outputs: [monitoring_report]

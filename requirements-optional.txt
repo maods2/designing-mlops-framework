@@ -1,0 +1,9 @@
+# Optional dependencies for MLOps Framework
+
+# MLflow tracking backend
+mlflow>=1.20.0
+
+# Example project dependencies (not required for framework)
+# scikit-learn>=0.24.0
+# pandas>=1.2.0
+# numpy>=1.20.0

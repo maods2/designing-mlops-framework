@@ -12,7 +12,7 @@ dist/
 build/
 
 # Artifacts and dist (under each model project, e.g. template_model/)
-**/artifacts/
+example_model/artifacts
 **/dist/
 
 *.csv

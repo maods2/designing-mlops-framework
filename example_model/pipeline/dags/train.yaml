@@ -1,0 +1,14 @@
+workflow_name: example_workflow_sequential
+execution_mode: sequential
+pipeline_type: training
+feature_name: example
+config_version: 2
+models:
+  - model_name: example_model
+    compute: s
+    training_platform: VertexAI
+    module: "example_model.train"
+    optional_configs:
+      test_size: 0.2
+      hyperparameters:
+        max_iter: 1000

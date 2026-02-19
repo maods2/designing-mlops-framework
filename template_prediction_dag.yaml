@@ -1,0 +1,33 @@
+
+workflow_name: eds_workflow_prediction
+execution_mode: sequential  # Options: sequential, parallel
+pipeline_type: prediction
+config_version: 2
+feature_name: eds
+models:
+  - model_name: lr_p708
+    # Dataset configuration
+    prediction_dataset_name: dataset_name  # BigQuery dataset containing input data
+    prediction_table_name: table_name      # BigQuery table with data for prediction
+    
+    # Platform configuration
+    serving_platform: VertexAI  # Options: Dataproc, VertexAI
+    module: "example_model.predict"
+    # Model configuration
+    # Specify EITHER model_id (specific version) OR model_display_name (latest version)
+    model_id: ""  # Specific Model ID if not using latest model
+    model_version: "latest"  # Registered model display name (uses latest version if model_id empty)
+    
+    # Output configuration
+    prediction_output_dataset_table: dataset.table_name  # Full table name for prediction results
+    
+    # Column name configuration
+    predicted_label_column_name: ""  # Name of the predicted label column in output
+    predicted_timestamp_column_name: ""  # Timestamp column name for predicted results
+    predicted_probability_column_name: ""  # Name of predicted probability column (for classification)
+    
+    # Row identification
+    unique_identifier_column: vin  # Column that uniquely identifies each row (prevents duplicates)
+    optional_configs:
+    # Optional configurations for prediction
+      prediction_threshold: 0.5  # Threshold for predicted probability (between 0 and 1)

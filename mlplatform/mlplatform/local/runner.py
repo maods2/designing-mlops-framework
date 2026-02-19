@@ -1,135 +1,165 @@
-"""Local pipeline execution - load config and run steps without Airflow."""
+"""Local workflow execution - load config and run models via profiles and resolver."""
 
 from __future__ import annotations
 
 import importlib
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from mlplatform.config.loader import (
-    _env_data_to_config,
-    load_pipeline_config as _load_pipeline_config,
-)
-from mlplatform.config.registry import get_etb, get_runner, get_storage
-from mlplatform.config.schema import PipelineConfig, RunConfig, StepConfig
-from mlplatform.core.context import ExecutionContext
-from mlplatform.core.steps import Step
+from mlplatform.config.loader import load_workflow_config
+from mlplatform.config.schema import ModelConfig, WorkflowConfig
+from mlplatform.core.enums import ExecutionNature
+from mlplatform.core.predictor import BasePredictor
+from mlplatform.core.steps import InferenceStep, TrainStep
+from mlplatform.core.trainer import BaseTrainer
+from mlplatform.profiles.registry import get_profile
+from mlplatform.profiles.resolver import PrimitiveResolver
 
 
-def load_pipeline_config(
-    dag_path: str | Path,
-    steps_dir: str | Path,
-    env: str,
-    version: str | None = None,
-) -> PipelineConfig:
-    """Load and merge DAG and step configuration. Env configs defined in step YAMLs."""
-    return _load_pipeline_config(dag_path, steps_dir, env, None, version)
+def _generate_version() -> str:
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    short_id = str(uuid.uuid4())[:8]
+    return f"{ts}_{short_id}"
 
 
-def _instantiate_step(step_config: StepConfig) -> Step:
-    """Load step class from module and instantiate."""
-    mod = importlib.import_module(step_config.module)
-    cls = getattr(mod, step_config.class_name)
-    return cls()
-
-
-def _build_context(
-    run_config: RunConfig,
-    cwd: Path | None = None,
-    project_root: str | Path | None = None,
-    base_path: str | Path | None = None,
-) -> ExecutionContext:
-    """Build ExecutionContext from RunConfig.
-    base_path: Injected by orchestrator (bucket or root folder). Required for storage/etb.
-    project_root: Model project root (e.g. template_model/). Used for packaging, etc.
-    """
-    env = run_config.env_config
-    if project_root is not None:
-        env.extra = {**env.extra, "project_root": str(Path(project_root).resolve())}
-    # base_path: orchestrator-injected. Fallback for local: project_root/artifacts
-    resolved_base = base_path
-    if resolved_base is None and project_root is not None:
-        resolved_base = str(Path(project_root).resolve() / "artifacts")
-    if resolved_base is None:
-        resolved_base = "./artifacts"
-    resolved_base = str(Path(resolved_base).resolve()) if resolved_base else "./artifacts"
-    runner_kwargs = env.extra.get("runner_config", {})
-    storage = get_storage(env.storage, base_path=resolved_base)
-    etb = get_etb(env.etb, base_path=resolved_base)
-    runner = get_runner(env.runner, **runner_kwargs)
-
-    return ExecutionContext(
-        storage=storage,
-        etb=etb,
-        runner=runner,
-        run_config=run_config,
-        feature=run_config.feature,
-        model_name=run_config.model_name,
-        version=run_config.version,
-        step_name=run_config.step.name,
-        custom=run_config.custom,
+def _resolve_class(module_path: str, base_class: type) -> type:
+    """Import a module and find the first subclass of base_class."""
+    mod = importlib.import_module(module_path)
+    for attr_name in dir(mod):
+        attr = getattr(mod, attr_name)
+        if (
+            isinstance(attr, type)
+            and issubclass(attr, base_class)
+            and attr is not base_class
+        ):
+            return attr
+    raise ImportError(
+        f"No {base_class.__name__} subclass found in module '{module_path}'"
     )
 
 
-def run_step_local(
-    step_name: str,
+def run_workflow(
     dag_path: str | Path,
-    steps_dir: str | Path,
-    env: str = "dev",
+    profile_name: str = "local",
     version: str | None = None,
     project_root: str | Path | None = None,
     base_path: str | Path | None = None,
-    **kwargs: Any,
-) -> Any:
-    """Run a single step locally. Kwargs are passed to step.run()."""
-    config = load_pipeline_config(dag_path, steps_dir, env, version)
-    step_config = next((s for s in config.steps if s.name == step_name), None)
-    if step_config is None:
-        raise ValueError(f"Step '{step_name}' not found in pipeline")
-
-    env_data = step_config.envs.get(config.env) or step_config.envs.get("dev") or {}
-    env_config = _env_data_to_config(env_data)
-
-    run_config = RunConfig(
-        step=step_config,
-        pipeline_name=config.pipeline_name,
-        model_name=config.model_name,
-        version=config.version,
-        feature=config.feature,
-        env_config=env_config,
-        custom=step_config.custom,
-    )
-
-    context = _build_context(run_config, project_root=project_root, base_path=base_path)
-    step = _instantiate_step(step_config)
-    step._context = context
-    return context.runner.run(step, context, **kwargs)
-
-
-def run_pipeline_local(
-    config: PipelineConfig,
-    project_root: str | Path | None = None,
-    base_path: str | Path | None = None,
-    **step_kwargs: Any,
 ) -> dict[str, Any]:
-    """Run full pipeline locally. step_kwargs keyed by step name passed to each step."""
+    """Run a full workflow from a DAG YAML using the new architecture.
+
+    Loads the WorkflowConfig, resolves profile, and runs each model
+    through the PrimitiveResolver -> runner.execute() pipeline.
+    """
+    workflow = load_workflow_config(dag_path)
+    version = version or _generate_version()
+
+    resolved_base = str(Path(base_path).resolve()) if base_path else "./artifacts"
+    if project_root is not None:
+        resolved_base = resolved_base or str(Path(project_root).resolve() / "artifacts")
+
+    profile = get_profile(profile_name, base_path=resolved_base)
+    resolver = PrimitiveResolver()
+
     results: dict[str, Any] = {}
-    for step_config in config.steps:
-        env_data = step_config.envs.get(config.env) or step_config.envs.get("dev") or {}
-        env_config = _env_data_to_config(env_data)
-        run_config = RunConfig(
-            step=step_config,
-            pipeline_name=config.pipeline_name,
-            model_name=config.model_name,
-            version=config.version,
-            feature=config.feature,
-            env_config=env_config,
-            custom=step_config.custom,
+    for model_cfg in workflow.models:
+        result = _run_model(
+            workflow=workflow,
+            model_cfg=model_cfg,
+            profile=profile,
+            resolver=resolver,
+            version=version,
+            project_root=project_root,
         )
-        context = _build_context(run_config, project_root=project_root, base_path=base_path)
-        step = _instantiate_step(step_config)
-        step._context = context
-        kwargs = step_kwargs.get(step_config.name, {})
-        result = context.runner.run(step, context, **kwargs)
-        results[step_config.name] = result
+        results[model_cfg.model_name] = result
+
     return results
+
+
+def _run_model(
+    workflow: WorkflowConfig,
+    model_cfg: ModelConfig,
+    profile: Any,
+    resolver: PrimitiveResolver,
+    version: str,
+    project_root: str | Path | None = None,
+) -> Any:
+    """Run a single model entry from the workflow."""
+    runtime_config = {
+        "workflow_name": workflow.workflow_name,
+        "pipeline_type": workflow.pipeline_type,
+        "feature_name": workflow.feature_name,
+        "model_name": model_cfg.model_name,
+        "module": model_cfg.module,
+        "version": version,
+        "compute": model_cfg.compute,
+        "platform": model_cfg.platform,
+        "optional_configs": model_cfg.optional_configs,
+        "model_version": model_cfg.model_version,
+    }
+    environment_metadata = {
+        "base_path": str(getattr(profile.storage, "base_path", "./artifacts")),
+        "execution_mode": workflow.execution_mode,
+        "config_version": workflow.config_version,
+    }
+    if project_root is not None:
+        environment_metadata["project_root"] = str(Path(project_root).resolve())
+
+    if workflow.pipeline_type == "training":
+        return _run_training_model(
+            model_cfg, profile, resolver, runtime_config, environment_metadata
+        )
+    else:
+        return _run_prediction_model(
+            model_cfg, profile, resolver, runtime_config, environment_metadata
+        )
+
+
+def _run_training_model(
+    model_cfg: ModelConfig,
+    profile: Any,
+    resolver: PrimitiveResolver,
+    runtime_config: dict[str, Any],
+    environment_metadata: dict[str, Any],
+) -> Any:
+    trainer_cls = _resolve_class(model_cfg.module, BaseTrainer)
+    trainer = trainer_cls()
+
+    step = TrainStep()
+    runner, context = resolver.resolve(
+        step=step,
+        profile=profile,
+        trainer=trainer,
+        runtime_config=runtime_config,
+        environment_metadata=environment_metadata,
+    )
+
+    trainer.context = context
+    context.trainer = trainer
+    return runner.execute(step, context)
+
+
+def _run_prediction_model(
+    model_cfg: ModelConfig,
+    profile: Any,
+    resolver: PrimitiveResolver,
+    runtime_config: dict[str, Any],
+    environment_metadata: dict[str, Any],
+) -> Any:
+    predictor_cls = _resolve_class(model_cfg.module, BasePredictor)
+    predictor = predictor_cls()
+
+    step = InferenceStep(execution_nature=ExecutionNature.JOB)
+    runner, context = resolver.resolve(
+        step=step,
+        profile=profile,
+        predictor=predictor,
+        runtime_config=runtime_config,
+        environment_metadata=environment_metadata,
+    )
+
+    predictor.context = context
+    context.predictor = predictor
+    predictor.load_model()
+    return runner.execute(step, context)

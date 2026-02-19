@@ -1,0 +1,16 @@
+workflow_name: example_workflow_prediction
+execution_mode: sequential
+pipeline_type: prediction
+feature_name: example
+config_version: 2
+models:
+  - model_name: example_model
+    serving_platform: VertexAI
+    module: "example_model.predict"
+    model_version: "latest"
+    prediction_dataset_name: dataset_name
+    prediction_table_name: table_name
+    prediction_output_dataset_table: dataset.output_table
+    unique_identifier_column: id
+    optional_configs:
+      prediction_threshold: 0.5

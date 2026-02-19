@@ -11,27 +11,15 @@ def build_model_package(
     model_src: str | Path,
     output_path: str | Path,
     include_patterns: Sequence[str] = ("**/*.py", "**/*.yaml", "**/*.yml"),
-    exclude_dirs: Sequence[str] = ("__pycache__", ".git", ".venv", "venv", ".pytest_cache"),
+    exclude_dirs: Sequence[str] = ("__pycache__", ".git", ".venv", "venv", ".pytest_cache", "dist"),
 ) -> Path:
-    """
-    Package model code into a zip file for Spark cluster deployment.
-
-    Args:
-        model_src: Path to model package (e.g. template_model/ or project root)
-        output_path: Output zip path (e.g. root.zip, gs://bucket/root.zip for GCS)
-        include_patterns: Glob patterns for files to include
-        exclude_dirs: Directory names to exclude
-
-    Returns:
-        Path to the created zip file
-    """
+    """Package model code into a zip file for Spark cluster deployment."""
     model_src = Path(model_src).resolve()
     output_path = Path(output_path)
 
     if not model_src.exists():
         raise FileNotFoundError(f"Model source not found: {model_src}")
 
-    # For local output, ensure parent exists
     if not str(output_path).startswith("gs://"):
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -52,24 +40,17 @@ def build_root_zip(
     model_package: str,
     output_dir: str | Path = "./dist",
     zip_name: str = "root.zip",
+    include_mlplatform: bool = True,
 ) -> Path:
-    """
-    Build root.zip containing model package and pipeline configs.
+    """Build root.zip containing model package and mlplatform framework.
 
-    Standard layout for Dataproc:
-    - root.zip
-      - template_model/  (or model_package name)
-      - config/          (optional env configs)
-      - pipeline/        (optional DAG/step YAMLs)
+    For cloud PySpark (Dataproc, VertexAI), workers need both the model code
+    AND the mlplatform framework code in the zip.
 
-    Args:
-        project_root: Project root directory
-        model_package: Name of model package (e.g. template_model)
-        output_dir: Where to write root.zip
-        zip_name: Output zip filename
-
-    Returns:
-        Path to root.zip
+    Standard layout in root.zip:
+    - <model_package>/  (e.g. example_model/)
+    - mlplatform/       (framework code, included for cloud workers)
+    - config/           (optional)
     """
     project_root = Path(project_root).resolve()
     output_dir = Path(output_dir)
@@ -80,20 +61,54 @@ def build_root_zip(
     if not model_src.exists():
         raise FileNotFoundError(f"Model package not found: {model_src}")
 
-    seen = set()
+    exclude_dirs = {"__pycache__", ".git", ".venv", "venv", ".pytest_cache", "dist", ".egg-info"}
+    include_tops = {model_package, "config"}
+    if include_mlplatform:
+        include_tops.add("mlplatform")
+
+    seen: set[str] = set()
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fp in project_root.rglob("*"):
-            if not fp.is_file() or "__pycache__" in str(fp):
+        for top_name in include_tops:
+            top_dir = project_root / top_name
+            if not top_dir.exists():
+                _try_installed_package(zf, top_name, seen, exclude_dirs)
                 continue
-            rel = fp.relative_to(project_root)
-            # Only include model package, config, and pipeline
-            top = rel.parts[0] if rel.parts else ""
-            if top not in (model_package, "config"):
-                continue
-            name = str(rel)
-            if name in seen:
-                continue
-            seen.add(name)
-            zf.write(fp, name)
+            for fp in top_dir.rglob("*"):
+                if not fp.is_file():
+                    continue
+                rel = fp.relative_to(project_root)
+                if any(ex in rel.parts for ex in exclude_dirs):
+                    continue
+                name = str(rel)
+                if name not in seen:
+                    seen.add(name)
+                    zf.write(fp, name)
 
     return output_path
+
+
+def _try_installed_package(
+    zf: zipfile.ZipFile,
+    package_name: str,
+    seen: set[str],
+    exclude_dirs: set[str],
+) -> None:
+    """If a package isn't in project_root, try to include it from the installed site-packages."""
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec(package_name)
+        if spec is None or spec.origin is None:
+            return
+        pkg_root = Path(spec.origin).parent
+        for fp in pkg_root.rglob("*"):
+            if not fp.is_file():
+                continue
+            rel = Path(package_name) / fp.relative_to(pkg_root)
+            if any(ex in rel.parts for ex in exclude_dirs):
+                continue
+            name = str(rel)
+            if name not in seen:
+                seen.add(name)
+                zf.write(fp, name)
+    except (ImportError, ValueError):
+        pass

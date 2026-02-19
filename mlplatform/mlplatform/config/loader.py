@@ -7,7 +7,13 @@ from typing import Any
 
 import yaml
 
-from mlplatform.config.schema import EnvConfig, PipelineConfig, StepConfig
+from mlplatform.config.schema import (
+    EnvConfig,
+    ModelConfig,
+    PipelineConfig,
+    StepConfig,
+    WorkflowConfig,
+)
 
 
 def _load_yaml(path: str | Path) -> dict[str, Any]:
@@ -15,8 +21,56 @@ def _load_yaml(path: str | Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+# ---------------------------------------------------------------------------
+# New format: WorkflowConfig (from template_training_dag / template_prediction_dag)
+# ---------------------------------------------------------------------------
+
+
+def load_workflow_config(dag_path: str | Path) -> WorkflowConfig:
+    """Load a workflow from the new DAG template format."""
+    dag_path = Path(dag_path)
+    if not dag_path.exists():
+        raise FileNotFoundError(f"DAG config not found: {dag_path}")
+
+    data = _load_yaml(dag_path)
+    pipeline_type = data.get("pipeline_type", "training")
+
+    models: list[ModelConfig] = []
+    for entry in data.get("models", []):
+        platform = entry.get("training_platform") or entry.get("serving_platform") or "VertexAI"
+        models.append(ModelConfig(
+            model_name=entry["model_name"],
+            module=entry.get("module", ""),
+            compute=entry.get("compute", "s"),
+            platform=platform,
+            optional_configs=entry.get("optional_configs") or {},
+            prediction_dataset_name=entry.get("prediction_dataset_name"),
+            prediction_table_name=entry.get("prediction_table_name"),
+            model_id=entry.get("model_id"),
+            model_version=entry.get("model_version", "latest"),
+            prediction_output_dataset_table=entry.get("prediction_output_dataset_table"),
+            predicted_label_column_name=entry.get("predicted_label_column_name"),
+            predicted_timestamp_column_name=entry.get("predicted_timestamp_column_name"),
+            predicted_probability_column_name=entry.get("predicted_probability_column_name"),
+            unique_identifier_column=entry.get("unique_identifier_column"),
+        ))
+
+    return WorkflowConfig(
+        workflow_name=data.get("workflow_name", "default_workflow"),
+        execution_mode=data.get("execution_mode", "sequential"),
+        pipeline_type=pipeline_type,
+        feature_name=data.get("feature_name", "default"),
+        config_version=data.get("config_version", 2),
+        models=models,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Legacy format: PipelineConfig (old DAG + step YAML files)
+# ---------------------------------------------------------------------------
+
+
 def _env_data_to_config(env_data: dict[str, Any]) -> EnvConfig:
-    """Build EnvConfig from step's env section. base_path not in config - orchestrator injects."""
     extra = {k: v for k, v in env_data.items() if k not in ("runner", "storage", "etb", "serving_mode", "base_path")}
     return EnvConfig(
         runner=env_data.get("runner", "LocalRunner"),
@@ -29,7 +83,7 @@ def _env_data_to_config(env_data: dict[str, Any]) -> EnvConfig:
 
 
 def load_step_config(step_name: str, steps_dir: str | Path) -> StepConfig:
-    """Load step configuration from steps directory. Configs (runner, storage, etb) defined per step."""
+    """Legacy: Load step configuration from steps directory."""
     path = Path(steps_dir) / f"{step_name}.yaml"
     if not path.exists():
         raise FileNotFoundError(f"Step config not found: {path}")
@@ -51,10 +105,10 @@ def load_pipeline_config(
     dag_path: str | Path,
     steps_dir: str | Path,
     env: str,
-    envs_dir: str | Path | None = None,  # Deprecated: configs now in step YAML
+    envs_dir: str | Path | None = None,
     version: str | None = None,
 ) -> PipelineConfig:
-    """Load and merge DAG, step, and environment configuration."""
+    """Legacy: Load and merge DAG, step, and environment configuration."""
     dag_path = Path(dag_path)
     steps_dir = Path(steps_dir)
     if not dag_path.exists():
@@ -64,7 +118,6 @@ def load_pipeline_config(
     pipeline_data = dag_data.get("pipeline", dag_data)
     pipeline_name = pipeline_data.get("name", "default_pipeline")
     model_name = pipeline_data.get("model_name", "default_model")
-    # Version: timestamp + short id when not specified in config (sortable, unique)
     version = version or pipeline_data.get("version")
     if not version or str(version).lower() in ("null", "none", ""):
         import uuid
@@ -73,7 +126,6 @@ def load_pipeline_config(
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         short_id = str(uuid.uuid4())[:8]
         version = f"{ts}_{short_id}"
-    # Feature: domain/use-case level, distinct from model (avoids feature/model duplication)
     feature = pipeline_data.get("feature") or pipeline_name
 
     steps: list[StepConfig] = []

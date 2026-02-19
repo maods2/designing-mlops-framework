@@ -1,4 +1,4 @@
-"""Abstract Runner interface for execution environments."""
+"""Abstract Runner interfaces for execution environments."""
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
@@ -8,10 +8,19 @@ if TYPE_CHECKING:
     from mlplatform.core.steps import Step
 
 
-class Runner(ABC):
-    """Abstract interface for execution environment runners."""
+class JobRunner(ABC):
+    """Execute finite-lifecycle steps (training, batch inference)."""
 
     @abstractmethod
-    def run(self, step: "Step", context: "ExecutionContext", **kwargs: Any) -> Any:
-        """Execute a step in this runner's environment."""
+    def execute(self, step: "Step", context: "ExecutionContext") -> Any:
+        """Execute a step as a job."""
+        ...
+
+
+class ServiceRunner(ABC):
+    """Start long-lived service steps (online inference)."""
+
+    @abstractmethod
+    def start(self, step: "Step", context: "ExecutionContext") -> Any:
+        """Start a step as a long-running service."""
         ...

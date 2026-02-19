@@ -1,86 +1,55 @@
-"""Step abstractions - TrainStep, InferenceStep, PreprocessStep."""
+"""Step abstractions - TrainStep, InferenceStep."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any
 
-from mlplatform.core.context import ExecutionContext
+from mlplatform.core.enums import ExecutionNature, WorkloadType
 
 
 class Step(ABC):
-    """Abstract base for pipeline steps."""
+    """Abstract base for pipeline steps.
+
+    Each step declares its workload_type and execution_nature.
+    Steps do not resolve infrastructure -- that is handled by the Profile/Resolver.
+    """
+
+    workload_type: WorkloadType
+    execution_nature: ExecutionNature
 
     @abstractmethod
-    def run(self, context: ExecutionContext, **kwargs: Any) -> Any:
-        """Execute the step."""
+    def run(self, context: Any) -> Any:
+        """Execute the step with the given ExecutionContext."""
         ...
 
 
 class TrainStep(Step):
-    """Base class for training steps. Uses storage, etb, and custom config."""
+    """Training step: always a Job, delegates to context.trainer.train()."""
 
-    def _artifact_path(self, name: str) -> str:
-        """Resolve artifact path within feature/model/version hierarchy."""
-        ctx = getattr(self, "_context", None)
-        if ctx is None:
-            raise RuntimeError("Context not set. Use within run() only.")
-        return f"{ctx.feature}/{ctx.model_name}/{ctx.version}/{name}"
+    workload_type = WorkloadType.TRAINING
+    execution_nature = ExecutionNature.JOB
 
-    def save_artifact(self, name: str, obj: Any) -> None:
-        path = self._artifact_path(name)
-        self._context.storage.save(path, obj)
-
-    def load_artifact(self, name: str) -> Any:
-        path = self._artifact_path(name)
-        return self._context.storage.load(path)
-
-    def log_params(self, params: dict[str, Any]) -> None:
-        self._context.etb.log_params(params)
-
-    def log_metrics(self, metrics: dict[str, float]) -> None:
-        self._context.etb.log_metrics(metrics)
-
-    def log_artifact(self, path: str, artifact: Any) -> None:
-        self._context.etb.log_artifact(path, artifact)
-
-    def run(self, context: ExecutionContext, **kwargs: Any) -> Any:
-        raise NotImplementedError("Subclass must implement run()")
+    def run(self, context: Any) -> Any:
+        if context.trainer is None:
+            raise RuntimeError("TrainStep requires a trainer on the ExecutionContext")
+        context.trainer.train()
 
 
 class InferenceStep(Step):
-    """Base class for inference steps. Uses storage and custom config."""
+    """Inference step: delegates to context.invocation_strategy.invoke(predictor).
 
-    def _artifact_path(self, name: str) -> str:
-        ctx = getattr(self, "_context", None)
-        if ctx is None:
-            raise RuntimeError("Context not set. Use within run() only.")
-        return f"{ctx.feature}/{ctx.model_name}/{ctx.version}/{name}"
+    execution_nature is set per-instance (JOB for batch, SERVICE for online).
+    """
 
-    def load_artifact(self, name: str) -> Any:
-        path = self._artifact_path(name)
-        return self._context.storage.load(path)
+    workload_type = WorkloadType.INFERENCE
 
-    def run(self, context: ExecutionContext, **kwargs: Any) -> Any:
-        raise NotImplementedError("Subclass must implement run()")
+    def __init__(self, execution_nature: ExecutionNature = ExecutionNature.JOB) -> None:
+        self.execution_nature = execution_nature
 
-
-class PreprocessStep(Step):
-    """Base class for preprocessing steps."""
-
-    def _artifact_path(self, name: str) -> str:
-        ctx = getattr(self, "_context", None)
-        if ctx is None:
-            raise RuntimeError("Context not set. Use within run() only.")
-        return f"{ctx.feature}/{ctx.model_name}/{ctx.version}/{name}"
-
-    def save_artifact(self, name: str, obj: Any) -> None:
-        path = self._artifact_path(name)
-        self._context.storage.save(path, obj)
-
-    def load_artifact(self, name: str) -> Any:
-        path = self._artifact_path(name)
-        return self._context.storage.load(path)
-
-    def run(self, context: ExecutionContext, **kwargs: Any) -> Any:
-        raise NotImplementedError("Subclass must implement run()")
+    def run(self, context: Any) -> Any:
+        if context.predictor is None:
+            raise RuntimeError("InferenceStep requires a predictor on the ExecutionContext")
+        if context.invocation_strategy is None:
+            raise RuntimeError("InferenceStep requires an invocation_strategy on the ExecutionContext")
+        return context.invocation_strategy.invoke(context.predictor)

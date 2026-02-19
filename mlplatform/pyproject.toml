@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlplatform"
-version = "0.1.0"
+version = "0.2.0"
 description = "Production-ready MLOps framework with pluggable backends"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dependencies = [
     "pyyaml>=6.0",
     "scikit-learn>=1.0",

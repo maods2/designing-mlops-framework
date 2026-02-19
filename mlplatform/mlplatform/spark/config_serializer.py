@@ -1,4 +1,4 @@
-"""Serialize RunConfig for Spark/Dataproc main.py consumption."""
+"""Serialize workflow/runtime config for Spark/Dataproc main.py consumption."""
 
 from __future__ import annotations
 
@@ -6,49 +6,65 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mlplatform.config.schema import EnvConfig, RunConfig, StepConfig
+from mlplatform.config.schema import ModelConfig, WorkflowConfig
 
 
-def run_config_to_dict(
-    run_config: RunConfig,
-    base_path: str | None = None,
+def workflow_config_to_dict(
+    workflow: WorkflowConfig,
+    model: ModelConfig,
+    base_path: str = "./artifacts",
+    version: str = "dev",
 ) -> dict[str, Any]:
-    """Serialize RunConfig to JSON-serializable dict.
-    base_path: Injected by orchestrator (bucket or root folder). Required for storage.
-    """
+    """Serialize workflow + model config to JSON-serializable dict for cloud main.py."""
     return {
-        "step": {
-            "name": run_config.step.name,
-            "type": run_config.step.type,
-            "module": run_config.step.module,
-            "class": run_config.step.class_name,
-            "class_name": run_config.step.class_name,
-            "custom": run_config.step.custom,
+        "runtime_config": {
+            "workflow_name": workflow.workflow_name,
+            "pipeline_type": workflow.pipeline_type,
+            "feature_name": workflow.feature_name,
+            "model_name": model.model_name,
+            "module": model.module,
+            "class_name": _resolve_class_name(model.module),
+            "version": version,
+            "compute": model.compute,
+            "platform": model.platform,
+            "optional_configs": model.optional_configs,
+            "model_version": model.model_version,
         },
-        "pipeline_name": run_config.pipeline_name,
-        "model_name": run_config.model_name,
-        "version": run_config.version,
-        "feature": run_config.feature,
-        "env_config": {
-            "runner": run_config.env_config.runner,
-            "storage": run_config.env_config.storage,
-            "etb": run_config.env_config.etb,
-            "serving_mode": run_config.env_config.serving_mode,
-            "base_path": base_path or run_config.env_config.base_path or "./artifacts",
-            "extra": run_config.env_config.extra,
+        "environment_metadata": {
+            "base_path": base_path,
+            "execution_mode": workflow.execution_mode,
+            "config_version": workflow.config_version,
         },
-        "custom": run_config.custom,
     }
 
 
-def write_run_config(
-    run_config: RunConfig,
+def _resolve_class_name(module_path: str) -> str:
+    """Resolve the expected class name from a module path by convention.
+
+    Convention: the module's primary class is discovered at runtime by main.py
+    by inspecting the module for BaseTrainer/BasePredictor subclasses.
+    Falls back to module filename CamelCased.
+    """
+    parts = module_path.rsplit(".", 1)
+    if len(parts) == 2:
+        return parts[1].title().replace("_", "")
+    return module_path.title().replace("_", "")
+
+
+def write_workflow_config(
+    workflow: WorkflowConfig,
+    model: ModelConfig,
     path: str | Path,
-    base_path: str | None = None,
+    base_path: str = "./artifacts",
+    version: str = "dev",
 ) -> Path:
-    """Write RunConfig to JSON file. base_path injected by orchestrator."""
+    """Write workflow config to JSON file for cloud submission."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
-        json.dump(run_config_to_dict(run_config, base_path=base_path), f, indent=2)
+        json.dump(
+            workflow_config_to_dict(workflow, model, base_path=base_path, version=version),
+            f,
+            indent=2,
+        )
     return path

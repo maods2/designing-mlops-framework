@@ -1,4 +1,4 @@
-"""Dataproc Spark runner - submits steps to Dataproc cluster."""
+"""Dataproc Spark job runner - submits steps to Dataproc cluster."""
 
 from __future__ import annotations
 
@@ -6,22 +6,18 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from mlplatform.config.schema import RunConfig
-from mlplatform.runners.base import Runner
+from mlplatform.runners.base import JobRunner
 
 if TYPE_CHECKING:
     from mlplatform.core.context import ExecutionContext
     from mlplatform.core.steps import Step
-from mlplatform.spark.config_serializer import write_run_config
-from mlplatform.spark.packager import build_root_zip
 
 
-class DataprocSparkRunner(Runner):
-    """
-    Execute steps on a Dataproc Spark cluster.
+class DataprocJobRunner(JobRunner):
+    """Execute steps on a Dataproc Spark cluster.
 
     Submits job via: gcloud dataproc jobs submit pyspark
-    Format: mainscript=main.py, packages=root.zip
+    Requires main.py as entry point and root.zip as --py-files.
     """
 
     def __init__(
@@ -31,7 +27,7 @@ class DataprocSparkRunner(Runner):
         project: str | None = None,
         staging_bucket: str | None = None,
         main_script: str | Path | None = None,
-        model_package: str = "template_model",
+        model_package: str = "example_model",
     ) -> None:
         self.cluster = cluster
         self.region = region
@@ -41,38 +37,29 @@ class DataprocSparkRunner(Runner):
         self.model_package = model_package
 
     def _default_main_script(self) -> Path:
-        """Path to framework's main.py."""
         import mlplatform.spark.main as spark_main
-
         return Path(spark_main.__file__).resolve()
 
-    def run(self, step: "Step", context: "ExecutionContext", **kwargs: Any) -> Any:
-        """
-        Submit step to Dataproc. Does not wait for result or return in-process.
-        For async execution; orchestrator polls job status.
-        """
-        run_config = context.run_config
-        # project_root = model project dir (e.g. template_model/)
-        project_root = Path(run_config.env_config.extra.get("project_root", ".")).resolve()
-        monorepo_root = project_root.parent
+    def execute(self, step: "Step", context: "ExecutionContext") -> Any:
+        from mlplatform.spark.packager import build_root_zip
 
-        # Build root.zip under model project
+        project_root = Path(context.environment_metadata.get("project_root", ".")).resolve()
+        monorepo_root = project_root.parent
         dist_dir = project_root / "dist"
+
         root_zip = build_root_zip(
             project_root=monorepo_root,
             model_package=project_root.name,
             output_dir=dist_dir,
         )
 
-        # Write config to temp/local. base_path injected (orchestrator provides in prod)
-        dist_dir = Path(project_root) / "dist"
         config_path = dist_dir / "run_config.json"
-        base_path = str(Path(project_root) / "artifacts")
-        write_run_config(run_config, config_path, base_path=base_path)
+        self._write_context_config(context, config_path)
 
-        # Upload to GCS if staging_bucket set
         if self.staging_bucket:
-            gs_root = f"gs://{self.staging_bucket}/mlplatform/{run_config.model_name}/{run_config.version}"
+            model_name = context.runtime_config.get("model_name", "default")
+            version = context.runtime_config.get("version", "dev")
+            gs_root = f"gs://{self.staging_bucket}/mlplatform/{model_name}/{version}"
             gs_zip = f"{gs_root}/root.zip"
             gs_config = f"{gs_root}/run_config.json"
             self._upload_to_gcs(root_zip, config_path, gs_zip, gs_config)
@@ -83,28 +70,13 @@ class DataprocSparkRunner(Runner):
             config_arg = str(config_path)
 
         cmd = [
-            "gcloud",
-            "dataproc",
-            "jobs",
-            "submit",
-            "pyspark",
+            "gcloud", "dataproc", "jobs", "submit", "pyspark",
             str(self.main_script),
             f"--cluster={self.cluster}",
             f"--py-files={packages_arg}",
             "--",
             f"--config={config_arg}",
         ]
-        if run_config.step.type == "inference":
-            input_path = kwargs.get("input_path")
-            if not input_path:
-                raise ValueError("input_path required for inference (e.g. gs://bucket/data.csv)")
-            cmd.extend([f"--input-path={input_path}"])
-            if kwargs.get("output_path"):
-                cmd.append(f"--output-path={kwargs['output_path']}")
-        else:
-            cmd.append(f"--step-name={run_config.step.name}")
-            if kwargs.get("input_path"):
-                cmd.append(f"--input-path={kwargs['input_path']}")
         if self.region:
             cmd.insert(-1, f"--region={self.region}")
         if self.project:
@@ -113,8 +85,18 @@ class DataprocSparkRunner(Runner):
         subprocess.run(cmd, check=True)
         return None
 
-    def _upload_to_gcs(self, local_zip: Path, local_config: Path, gs_zip: str, gs_config: str) -> None:
-        """Upload root.zip and config to GCS."""
+    @staticmethod
+    def _write_context_config(context: Any, config_path: Path) -> None:
+        import json
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w") as f:
+            json.dump({
+                "runtime_config": context.runtime_config,
+                "environment_metadata": context.environment_metadata,
+            }, f, indent=2)
+
+    @staticmethod
+    def _upload_to_gcs(local_zip: Path, local_config: Path, gs_zip: str, gs_config: str) -> None:
         try:
             subprocess.run(["gsutil", "cp", str(local_zip), gs_zip], check=True)
             subprocess.run(["gsutil", "cp", str(local_config), gs_config], check=True)

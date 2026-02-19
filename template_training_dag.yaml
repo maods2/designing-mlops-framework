@@ -4,7 +4,7 @@ pipeline_type: training
 feature_name: eds  # Vehicle feature abbreviated name (e.g., eds, ol, tsl)
 config_version: 2
 models:
-  - model_name: lr_p708  # Unique identifier for this model
+  - model_name: lr_p708  # Unique identifier for this model
     # Compute size: xs (4 cores, 15GB), s (8 cores, 32GB), m (16 cores, 64GB), l (60 cores, 240GB)
     compute: s 
     training_platform: VertexAI # Options: Dataproc, VertexAI

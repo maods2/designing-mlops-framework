@@ -1,3 +1,3 @@
-"""MLOps framework with pluggable backends and profile-driven execution."""
+"""MLOps framework with simplified, extensible architecture."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

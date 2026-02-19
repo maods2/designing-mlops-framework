@@ -23,7 +23,6 @@ def workflow_config_to_dict(
             "feature_name": workflow.feature_name,
             "model_name": model.model_name,
             "module": model.module,
-            "class_name": _resolve_class_name(model.module),
             "version": version,
             "compute": model.compute,
             "platform": model.platform,
@@ -34,21 +33,9 @@ def workflow_config_to_dict(
             "base_path": base_path,
             "execution_mode": workflow.execution_mode,
             "config_version": workflow.config_version,
+            "log_level": workflow.log_level,
         },
     }
-
-
-def _resolve_class_name(module_path: str) -> str:
-    """Resolve the expected class name from a module path by convention.
-
-    Convention: the module's primary class is discovered at runtime by main.py
-    by inspecting the module for BaseTrainer/BasePredictor subclasses.
-    Falls back to module filename CamelCased.
-    """
-    parts = module_path.rsplit(".", 1)
-    if len(parts) == 2:
-        return parts[1].title().replace("_", "")
-    return module_path.title().replace("_", "")
 
 
 def write_workflow_config(

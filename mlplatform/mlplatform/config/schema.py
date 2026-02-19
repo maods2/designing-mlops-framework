@@ -1,4 +1,4 @@
-"""Configuration schema for the new DAG template format."""
+"""Configuration schema for DAG template format."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ class ModelConfig:
     compute: str = "s"
     platform: str = "VertexAI"
     optional_configs: dict[str, Any] = field(default_factory=dict)
-    # Prediction-specific fields
     prediction_dataset_name: str | None = None
     prediction_table_name: str | None = None
     model_id: str | None = None
@@ -32,67 +31,12 @@ class ModelConfig:
 
 @dataclass
 class WorkflowConfig:
-    """Full workflow configuration parsed from a DAG YAML template.
-
-    Replaces the old PipelineConfig. Top-level pipeline_type determines
-    whether this is a training or prediction workflow.
-    """
+    """Full workflow configuration parsed from a DAG YAML template."""
 
     workflow_name: str
-    execution_mode: str  # sequential, parallel
-    pipeline_type: str  # training, prediction
+    execution_mode: str
+    pipeline_type: str
     feature_name: str
     config_version: int
     models: list[ModelConfig]
-
-
-# --- Legacy schemas kept for backward compatibility during migration ---
-
-
-@dataclass
-class StepConfig:
-    """Legacy: Configuration for a single step."""
-
-    name: str
-    type: str
-    module: str
-    class_name: str
-    envs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    custom: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class EnvConfig:
-    """Legacy: Environment-specific configuration."""
-
-    runner: str
-    storage: str
-    etb: str
-    serving_mode: str = "ProceduralLocal"
-    base_path: str | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class PipelineConfig:
-    """Legacy: Full pipeline configuration."""
-
-    pipeline_name: str
-    model_name: str
-    version: str
-    feature: str
-    steps: list[StepConfig]
-    env: str
-
-
-@dataclass
-class RunConfig:
-    """Legacy: Merged configuration for a single step execution."""
-
-    step: StepConfig
-    pipeline_name: str
-    model_name: str
-    version: str
-    feature: str
-    env_config: EnvConfig
-    custom: dict[str, Any] = field(default_factory=dict)
+    log_level: str = "INFO"

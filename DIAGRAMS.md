@@ -1,287 +1,393 @@
 # ML Platform Framework — Architecture Diagrams
 
-Diagrams at different abstraction levels to understand the framework.
+Mermaid diagrams at different abstraction levels to understand the framework.
 
 ---
 
-## Level 1: Component Overview
+## Level 1: High-Level Overview
 
-High-level separation of responsibilities.
-
-```mermaid
-flowchart TB
-    subgraph Orchestrator["Orchestrator (Airflow)"]
-        DAG[DAG / Pipeline Config]
-        Trigger[Trigger Step]
-    end
-
-    subgraph MLFramework["ML Framework Lib"]
-        Runner[Runner]
-        Storage[Storage]
-        ETB[Experiment Tracker]
-        Steps[Step Abstractions]
-    end
-
-    subgraph ModelCode["Model Code"]
-        Train[MyTrain]
-        Predict[MyInference]
-    end
-
-    DAG --> Trigger
-    Trigger --> Runner
-    Runner --> Steps
-    Steps --> Storage
-    Steps --> ETB
-    Steps --> Train
-    Steps --> Predict
-```
-
----
-
-## Level 2: Primitives & Registry
-
-Pluggable backends and how they connect.
-
-```mermaid
-flowchart LR
-    subgraph Runners["Runners"]
-        LocalRunner[LocalRunner]
-        LocalSpark[LocalSparkRunner]
-        Dataproc[DataprocSparkRunner]
-    end
-
-    subgraph Storage["Storage"]
-        LocalFS[LocalFileSystem]
-        GCS[GCS]
-    end
-
-    subgraph ETB["Experiment Tracking"]
-        NoneETB[NoneTracker]
-        LocalJson[LocalJsonTracker]
-        MLflow[MLflow]
-    end
-
-    subgraph Steps["Step Types"]
-        TrainStep[TrainStep]
-        InferenceStep[InferenceStep]
-    end
-
-    RunConfig[RunConfig] --> Runners
-    RunConfig --> Storage
-    RunConfig --> ETB
-    RunConfig --> Steps
-```
-
----
-
-## Level 3: Local vs Cloud Execution Paths
-
-When and how execution happens.
-
-```mermaid
-flowchart TB
-    Start[Pipeline Run] --> EnvCheck{Environment?}
-    
-    EnvCheck -->|dev / local_spark| Local[Local Path]
-    EnvCheck -->|prod| Cloud[Cloud Path]
-
-    subgraph Local["Local Execution"]
-        Direct[direct=True]
-        Direct --> InProcess[run_spark_step in-process]
-        InProcess --> NoMain[No main.py]
-        InProcess --> NoPack[No root.zip packaging]
-    end
-
-    subgraph Cloud["Cloud Execution"]
-        DataprocSubmit[DataprocSparkRunner]
-        DataprocSubmit --> BuildZip[Build root.zip]
-        BuildZip --> Upload[Upload to GCS]
-        Upload --> SparkSubmit["spark-submit main.py --py-files root.zip"]
-        SparkSubmit --> MainPy[main.py on cluster]
-    end
-
-    MainPy --> MapInPandas[mapInPandas distributed inference]
-```
-
----
-
-## Level 4: Spark Inference Flow (mapInPandas)
-
-How distributed prediction works on Dataproc.
-
-```mermaid
-flowchart TB
-    subgraph Driver["Driver (main.py)"]
-        LoadConfig[Load run_config.json]
-        CreateSpark[Create SparkSession]
-        ReadInput[spark.read.csv / parquet]
-        GetPredictor[Import predictor class from config]
-        MapInPandas[df.mapInPandas predict_fn]
-        WriteOutput[Write Parquet output]
-    end
-
-    subgraph Workers["Workers (mapInPandas)"]
-        P1[Partition 1]
-        P2[Partition 2]
-        P3[Partition N]
-    end
-
-    subgraph PartitionLogic["Per-partition logic"]
-        LoadModel[predictor.load_model storage, path]
-        IterBatches[For each batch in iterator]
-        PredictChunk[predictor.predict_chunk batch]
-        Yield[Yield DataFrame with predictions]
-    end
-
-    LoadConfig --> CreateSpark
-    CreateSpark --> ReadInput
-    ReadInput --> GetPredictor
-    GetPredictor --> MapInPandas
-    MapInPandas --> P1
-    MapInPandas --> P2
-    MapInPandas --> P3
-
-    P1 --> LoadModel
-    LoadModel --> IterBatches
-    IterBatches --> PredictChunk
-    PredictChunk --> Yield
-
-    MapInPandas --> WriteOutput
-```
-
----
-
-## Level 5: Pipeline Data Flow
-
-From config to step execution.
+Three layers: orchestration config, the framework, and user model code.
 
 ```mermaid
 flowchart TB
     subgraph Config["Configuration"]
-        DAG[DAG YAML train_infer.yaml]
-        StepYAML[Step YAMLs train.yaml, inference.yaml]
-        Env[env: dev | local_spark | prod]
+        DAG["DAG YAML\n(training / prediction)"]
     end
 
-    subgraph Resolved["Resolved RunConfig"]
-        StepConfig[StepConfig: name, type, module, class]
-        EnvConfig[EnvConfig: runner, storage, etb, base_path]
+    subgraph Framework["mlplatform Framework"]
+        Runner["Runner\n(run_workflow / dev_context)"]
+        Context["ExecutionContext"]
+        Storage["Storage"]
+        Artifacts["ArtifactStore"]
+        Tracker["ExperimentTracker"]
     end
 
-    subgraph Context["ExecutionContext"]
-        Storage[Storage]
-        ETB[ETB]
-        Runner[Runner]
-        RunConfig[RunConfig]
+    subgraph ModelCode["User Model Code"]
+        Trainer["MyTrainer\n(extends BaseTrainer)"]
+        Predictor["MyPredictor\n(extends BasePredictor)"]
     end
 
-    subgraph Execution["Execution"]
-        Instantiate[Instantiate step class]
-        Run[step.run context, **kwargs]
-        Result[Result]
-    end
-
-    DAG --> StepYAML
-    StepYAML --> Env
-    Env --> StepConfig
-    Env --> EnvConfig
-
-    StepConfig --> RunConfig
-    EnvConfig --> Context
-
-    Context --> Instantiate
-    Instantiate --> Run
-    Run --> Result
+    DAG --> Runner
+    Runner --> Context
+    Context --> Storage
+    Context --> Artifacts
+    Context --> Tracker
+    Context --> Trainer
+    Context --> Predictor
 ```
 
 ---
 
-## Level 6: Serving Modes (BasePredictor)
+## Level 2: Module Map
 
-Same core logic, different invocation wrappers.
-
-```mermaid
-flowchart TB
-    subgraph Core["BasePredictor Core"]
-        LoadModel[load_model storage, path]
-        PredictChunk[predict_chunk data]
-    end
-
-    subgraph BatchLocal["BatchLocal"]
-        Run[run data]
-        Run --> InProcess[In-process]
-        InProcess --> Script[Script / CLI]
-    end
-
-    subgraph OnlineREST["OnlineREST"]
-        PredictEndpoint["/predict"]
-        PredictEndpoint --> HTTP[HTTP request-response]
-        HTTP --> Service[Vertex AI / Cloud Run]
-    end
-
-    subgraph BatchSpark["BatchSpark"]
-        MapInPandas[mapInPandas partition fn]
-        MapInPandas --> MapSide[Map-side on workers]
-        MapSide --> Dataproc[Dataproc cluster]
-    end
-
-    LoadModel --> Run
-    PredictChunk --> Run
-
-    LoadModel --> PredictEndpoint
-    PredictChunk --> PredictEndpoint
-
-    LoadModel --> MapInPandas
-    PredictChunk --> MapInPandas
-```
-
----
-
-## Level 7: Artifact Hierarchy
-
-Where artifacts live (Feature > Model > Version).
-
-```mermaid
-flowchart TB
-    BasePath["base_path (injected by orchestrator)"]
-    
-    BasePath --> Feature["feature/"]
-    Feature --> Model["model_name/"]
-    Model --> Version["version/"]
-    Version --> Artifacts["model.pkl, metrics.json, ..."]
-
-    subgraph Example["Example"]
-        F[simple/]
-        M[simple_model/]
-        V[dev/]
-        A[model.pkl]
-        F --> M
-        M --> V
-        V --> A
-    end
-```
-
----
-
-## Level 8: Step Types & Execution Modes
+Package layout showing every module and its role.
 
 ```mermaid
 flowchart LR
-    subgraph TrainStep["TrainStep"]
-        T_Local[Procedural Local]
-        T_Batch[Batch Dataproc]
+    subgraph mlplatform["mlplatform/"]
+        runner["runner.py\nOrchestrator"]
+        log["log.py\nLogging"]
+
+        subgraph config["config/"]
+            schema["schema.py\nWorkflowConfig\nModelConfig"]
+            loader["loader.py\nload_workflow_config()"]
+        end
+
+        subgraph core["core/"]
+            context["context.py\nExecutionContext"]
+            trainer["trainer.py\nBaseTrainer ABC"]
+            predictor["predictor.py\nBasePredictor ABC"]
+        end
+
+        subgraph storage["storage/"]
+            storage_base["base.py\nStorage ABC"]
+            storage_local["local.py\nLocalFileSystem"]
+        end
+
+        subgraph artifacts["artifacts/"]
+            art_base["base.py\nArtifactStore ABC"]
+            art_local["local.py\nLocalArtifactStore"]
+        end
+
+        subgraph tracking["tracking/"]
+            trk_base["base.py\nExperimentTracker ABC"]
+            trk_local["local.py\nLocalJsonTracker"]
+            trk_none["none.py\nNoneTracker"]
+        end
+
+        subgraph spark["spark/"]
+            spark_main["main.py\nSpark entry point"]
+            serializer["config_serializer.py"]
+            packager["packager.py\nbuild_root_zip()"]
+        end
+
+        subgraph cli["cli/"]
+            cli_main["main.py\nmlplatform run\nmlplatform build-package"]
+        end
+
+        utils["utils/\nShared helpers"]
     end
-
-    subgraph InferenceStep["InferenceStep"]
-        I_Local[Procedural Local]
-        I_Online[OnlineREST Vertex AI]
-        I_Spark[SparkBatch Dataproc]
-    end
-
-    TrainStep --> T_Local
-    TrainStep --> T_Batch
-
-    InferenceStep --> I_Local
-    InferenceStep --> I_Online
-    InferenceStep --> I_Spark
 ```
+
+---
+
+## Level 3: Pluggable Backend Hierarchy
+
+Abstract base classes and their concrete implementations.
+
+```mermaid
+classDiagram
+    class Storage {
+        <<ABC>>
+        +save(path, obj)
+        +load(path)
+    }
+    class LocalFileSystem {
+        +save(path, obj)
+        +load(path)
+    }
+    Storage <|-- LocalFileSystem
+
+    class ArtifactStore {
+        <<ABC>>
+        +register_model(metadata)
+        +resolve_model(model_name)
+    }
+    class LocalArtifactStore {
+        -registry_path: str
+        +register_model(metadata)
+        +resolve_model(model_name)
+    }
+    ArtifactStore <|-- LocalArtifactStore
+
+    class ExperimentTracker {
+        <<ABC>>
+        +log_params(params)
+        +log_metrics(metrics)
+        +log_artifact(name, obj)
+    }
+    class LocalJsonTracker {
+        +log_params(params)
+        +log_metrics(metrics)
+        +log_artifact(name, obj)
+    }
+    class NoneTracker {
+        +log_params(params)
+        +log_metrics(metrics)
+        +log_artifact(name, obj)
+    }
+    ExperimentTracker <|-- LocalJsonTracker
+    ExperimentTracker <|-- NoneTracker
+
+    class BaseTrainer {
+        <<ABC>>
+        +context: ExecutionContext
+        +train()*
+    }
+    class BasePredictor {
+        <<ABC>>
+        +context: ExecutionContext
+        +load_model()*
+        +predict_chunk(data)*
+    }
+```
+
+---
+
+## Level 4: Training Data Flow
+
+From DAG YAML through the runner to the user's trainer.
+
+```mermaid
+flowchart TB
+    YAML["template_training_dag.yaml"] -->|load_workflow_config| WC["WorkflowConfig\n+ ModelConfig[]"]
+    WC -->|run_workflow / dev_context| Build["_build_context()"]
+
+    Build --> Infra["Create infrastructure"]
+    Infra --> S["LocalFileSystem"]
+    Infra --> A["LocalArtifactStore"]
+    Infra --> T["LocalJsonTracker"]
+
+    Build --> CTX["ExecutionContext\nfeature_name, model_name, version\noptional_configs, log"]
+
+    CTX --> Resolve["_resolve_class(module)\nimport + find subclass"]
+    Resolve --> Inst["trainer = MyTrainer()\ntrainer.context = ctx"]
+    Inst --> Train["trainer.train()"]
+
+    Train --> UserCode["User code runs"]
+    UserCode -->|ctx.save_artifact| S
+    UserCode -->|ctx.log_metrics| T
+    UserCode -->|ctx.register_model| A
+```
+
+---
+
+## Level 5: Prediction Data Flow
+
+From DAG YAML through the runner to the user's predictor.
+
+```mermaid
+flowchart TB
+    YAML["template_prediction_dag.yaml"] -->|load_workflow_config| WC["WorkflowConfig\n+ ModelConfig[]"]
+    WC -->|run_workflow / dev_context| Build["_build_context()"]
+
+    Build --> CTX["ExecutionContext"]
+
+    CTX --> Resolve["_resolve_class(module)"]
+    Resolve --> Inst["predictor = MyPredictor()\npredictor.context = ctx"]
+    Inst --> Load["predictor.load_model()"]
+    Load -->|ctx.load_artifact| Storage["Storage"]
+
+    Load --> Predict["predictor.predict_chunk(data)"]
+    Predict --> Result["DataFrame with predictions"]
+```
+
+---
+
+## Level 6: Entry Points
+
+Three ways to run the framework.
+
+```mermaid
+flowchart TB
+    subgraph DirectExec["Direct Execution (debug)"]
+        PyFile["python example_model/train.py"]
+        DevCtx["dev_context(dag_path)"]
+        PyFile --> DevCtx
+    end
+
+    subgraph CLI["CLI"]
+        Cmd["mlplatform run --dag dag.yaml"]
+        RunWF1["run_workflow()"]
+        Cmd --> RunWF1
+    end
+
+    subgraph PythonAPI["Python API"]
+        Import["from mlplatform.runner import run_workflow"]
+        RunWF2["run_workflow()"]
+        Import --> RunWF2
+    end
+
+    subgraph SparkEntry["Spark Entry Point"]
+        SparkCmd["spark-submit main.py\n--py-files root.zip\n-- --config config.json"]
+        SparkMain["spark/main.py"]
+        SparkCmd --> SparkMain
+    end
+
+    DevCtx --> BuildCtx["_build_context()"]
+    RunWF1 --> BuildCtx
+    RunWF2 --> BuildCtx
+    SparkMain --> BuildCtx2["_build_context_from_config()"]
+
+    BuildCtx --> CTX["ExecutionContext"]
+    BuildCtx2 --> CTX
+```
+
+---
+
+## Level 7: Spark Distributed Prediction (mapInPandas)
+
+How batch prediction works on a Spark cluster.
+
+```mermaid
+flowchart TB
+    subgraph Prep["Preparation"]
+        TrainFirst["1. Train model\n(artifacts saved)"]
+        Serialize["2. write_workflow_config()\n→ spark_config.json"]
+        Package["3. build_root_zip()\n→ root.zip"]
+    end
+
+    subgraph Driver["Driver Node (main.py)"]
+        LoadCfg["Load spark_config.json"]
+        CreateSpark["Create SparkSession"]
+        ReadInput["spark.read input data"]
+        BuildCtx["Build ExecutionContext"]
+        Resolve["Resolve predictor class"]
+        MapIP["sdf.mapInPandas(predict_fn)"]
+        WriteOut["Write output parquet"]
+    end
+
+    subgraph Workers["Worker Nodes"]
+        W1["Partition 1"]
+        W2["Partition 2"]
+        WN["Partition N"]
+    end
+
+    subgraph PerPartition["Per-Partition Logic"]
+        LM["predictor.load_model()"]
+        Iter["for batch in iterator"]
+        PC["predictor.predict_chunk(batch)"]
+        Yield["yield DataFrame"]
+    end
+
+    TrainFirst --> Serialize
+    Serialize --> Package
+    Package --> LoadCfg
+
+    LoadCfg --> CreateSpark --> ReadInput --> BuildCtx --> Resolve --> MapIP
+    MapIP --> W1 & W2 & WN
+    W1 --> LM --> Iter --> PC --> Yield
+    MapIP --> WriteOut
+```
+
+---
+
+## Level 8: Artifact Layout
+
+Where artifacts are stored on disk (or cloud storage).
+
+```mermaid
+flowchart TB
+    Base["base_path\n(./artifacts or gs://bucket)"]
+    Base --> Feature["feature_name/\n(e.g. eds)"]
+    Feature --> Model["model_name/\n(e.g. lr_p708)"]
+    Model --> Version["version/\n(e.g. v1.0 or dev)"]
+    Version --> M["model.pkl"]
+    Version --> S["scaler.pkl"]
+    Version --> Other["..."]
+
+    Base --> Registry["model_registry.json"]
+    Base --> Metrics["metrics.json"]
+
+    style Base fill:#f0f0f0,stroke:#333
+    style Registry fill:#fff3cd,stroke:#856404
+    style Metrics fill:#fff3cd,stroke:#856404
+```
+
+---
+
+## Level 9: ExecutionContext API
+
+What the user's code interacts with.
+
+```mermaid
+classDiagram
+    class ExecutionContext {
+        +storage: Storage
+        +artifact_store: ArtifactStore
+        +experiment_tracker: ExperimentTracker
+        +feature_name: str
+        +model_name: str
+        +version: str
+        +optional_configs: dict
+        +log: Logger
+        +artifact_base_path: str
+        +save_artifact(name, obj)
+        +load_artifact(name)
+        +load_artifact_from(model, version, name)
+        +log_params(params)
+        +log_metrics(metrics)
+        +register_model(metadata)
+    }
+
+    class BaseTrainer {
+        +context: ExecutionContext
+        +train()*
+    }
+
+    class BasePredictor {
+        +context: ExecutionContext
+        +load_model()*
+        +predict_chunk(data)*
+    }
+
+    ExecutionContext --> BaseTrainer : injected
+    ExecutionContext --> BasePredictor : injected
+    ExecutionContext --> Storage : delegates
+    ExecutionContext --> ArtifactStore : delegates
+    ExecutionContext --> ExperimentTracker : delegates
+```
+
+---
+
+## Level 10: Local vs Cloud Execution
+
+Same framework code, different infrastructure.
+
+```mermaid
+flowchart TB
+    DAG["DAG YAML"] --> Runner["Runner"]
+
+    Runner --> EnvCheck{Profile?}
+
+    EnvCheck -->|local| LocalPath
+    EnvCheck -->|cloud| CloudPath
+
+    subgraph LocalPath["Local Execution"]
+        LS["LocalFileSystem\n(./artifacts)"]
+        LA["LocalArtifactStore\n(model_registry.json)"]
+        LT["LocalJsonTracker\n(metrics.json)"]
+        LP["python train.py\nor mlplatform run"]
+    end
+
+    subgraph CloudPath["Cloud Execution (Dataproc / VertexAI)"]
+        GCS["GCS Storage\n(gs://bucket/...)"]
+        CA["Cloud ArtifactStore\n(Vertex AI Model Registry)"]
+        CT["Cloud Tracker\n(MLflow / W&B)"]
+        SS["spark-submit main.py\n--py-files root.zip"]
+    end
+
+    style CloudPath fill:#f8f9fa,stroke:#6c757d,stroke-dasharray: 5 5
+```
+
+> Dashed border: cloud backends are extension points, not yet implemented. The framework architecture supports them via the ABC interfaces.

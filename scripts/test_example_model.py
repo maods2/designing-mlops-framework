@@ -1,146 +1,71 @@
 #!/usr/bin/env python
-"""Test example_model: procedural and Spark batch prediction."""
+"""Test example_model against the simplified mlplatform API."""
 
 import sys
 from pathlib import Path
 
+import pandas as pd
+from sklearn.datasets import make_classification
+
 monorepo_root = Path(__file__).resolve().parent.parent
-model_root = monorepo_root / "example_model"
 sys.path.insert(0, str(monorepo_root))
+sys.path.insert(0, str(monorepo_root / "mlplatform"))
 
 
-def test_load_data_csv():
-    """Test framework load_data with CSV."""
-    from mlplatform.data import load_data
+def test_run_training_workflow():
+    """Test running training via run_workflow with a DAG YAML."""
+    from mlplatform.runner import run_workflow, _build_context
+    from mlplatform.config.loader import load_workflow_config
 
-    csv_path = model_root / "data" / "sample_inference.csv"
-    df = load_data({"type": "csv", "path": str(csv_path)}, format="pandas")
-    assert len(df) == 3
-    assert "f0" in df.columns
-    print("✓ load_data (CSV)")
+    dag_path = monorepo_root / "template_training_dag.yaml"
+    workflow = load_workflow_config(dag_path)
 
+    X, y = make_classification(n_samples=50, n_features=5, random_state=42)
+    train_data = {
+        "X": pd.DataFrame(X, columns=["f0", "f1", "f2", "f3", "f4"]),
+        "y": pd.Series(y),
+    }
 
-def test_load_config():
-    """Test loading pipeline config."""
-    from mlplatform.local import load_pipeline_config
+    artifacts_dir = monorepo_root / "test_artifacts"
 
-    config = load_pipeline_config(
-        dag_path=model_root / "pipeline/dags/train_infer.yaml",
-        steps_dir=model_root / "pipeline/steps",
-        env="dev",
-    )
-    assert config.pipeline_name == "example_pipeline"
-    assert config.model_name == "example_model"
-    assert len(config.steps) == 2  # train, inference
-    print("✓ load_pipeline_config")
+    model_cfg = workflow.models[0]
+    ctx = _build_context(workflow, model_cfg, "local", "test_v1", str(artifacts_dir))
+    ctx.optional_configs["train_data"] = train_data
 
+    from example_model.train import MyTrainer
+    trainer = MyTrainer()
+    trainer.context = ctx
+    trainer.train()
 
-def test_run_pipeline_local():
-    """Test running full pipeline (train + inference) with CSV."""
-    from mlplatform.local import load_pipeline_config, run_pipeline_local
-
-    import pandas as pd
-
-    config = load_pipeline_config(
-        dag_path=model_root / "pipeline/dags/train_infer.yaml",
-        steps_dir=model_root / "pipeline/steps",
-        env="dev",
-    )
-    train_csv = model_root / "data" / "sample_train.csv"
-    inference_csv = model_root / "data" / "sample_inference.csv"
-    train_df = pd.read_csv(train_csv)
-    train_data = {"X": train_df.drop(columns=["target"]), "y": train_df["target"]}
-    results = run_pipeline_local(
-        config,
-        project_root=model_root,
-        base_path=model_root / "artifacts",
-        train={"train_data": train_data},
-        inference={"inference_data": pd.read_csv(inference_csv)},
-    )
-    assert "train" in results
-    assert "inference" in results
-    assert len(results["inference"]) == 3
-    print("✓ run_pipeline_local (train + inference)")
+    model_path = artifacts_dir / workflow.feature_name / model_cfg.model_name / "test_v1" / "model.pkl"
+    assert model_path.exists(), f"Model artifact not found at {model_path}"
+    print("PASS test_run_training_workflow")
 
 
-def test_procedural_prediction_csv():
-    """Test procedural prediction with CSV."""
-    from mlplatform.local import load_pipeline_config, run_pipeline_local
+def test_run_prediction():
+    """Test running prediction after training."""
+    from mlplatform.config.loader import load_workflow_config
+    from mlplatform.runner import _build_context
 
-    import pandas as pd
+    dag_path = monorepo_root / "template_prediction_dag.yaml"
+    workflow = load_workflow_config(dag_path)
+    model_cfg = workflow.models[0]
 
-    config = load_pipeline_config(
-        dag_path=model_root / "pipeline/dags/train_infer.yaml",
-        steps_dir=model_root / "pipeline/steps",
-        env="dev",
-    )
-    train_csv = model_root / "data" / "sample_train.csv"
-    inference_csv = model_root / "data" / "sample_inference.csv"
-    train_df = pd.read_csv(train_csv)
-    train_data = {"X": train_df.drop(columns=["target"]), "y": train_df["target"]}
-    results = run_pipeline_local(
-        config,
-        project_root=model_root,
-        base_path=model_root / "artifacts",
-        train={"train_data": train_data},
-        inference={"inference_data": pd.read_csv(inference_csv)},
-    )
-    assert len(results["inference"]) == 3
-    print("✓ procedural prediction (CSV)")
+    artifacts_dir = monorepo_root / "test_artifacts"
+    ctx = _build_context(workflow, model_cfg, "local", "test_v1", str(artifacts_dir))
 
+    from example_model.predict import MyPredictor
+    predictor = MyPredictor()
+    predictor.context = ctx
+    predictor.load_model()
 
-def test_procedural_prediction_load_data():
-    """Test procedural prediction using load_data (framework data retrieval)."""
-    from mlplatform.data import load_data
-    from mlplatform.local import load_pipeline_config, run_pipeline_local
+    X_test, _ = make_classification(n_samples=5, n_features=5, random_state=99)
+    test_df = pd.DataFrame(X_test, columns=["f0", "f1", "f2", "f3", "f4"])
+    result = predictor.predict_chunk(test_df)
 
-    config = load_pipeline_config(
-        dag_path=model_root / "pipeline/dags/train_infer.yaml",
-        steps_dir=model_root / "pipeline/steps",
-        env="dev",
-    )
-    train_csv = model_root / "data" / "sample_train.csv"
-    inference_csv = model_root / "data" / "sample_inference.csv"
-    train_df = load_data({"type": "csv", "path": str(train_csv)}, format="pandas")
-    train_data = {"X": train_df.drop(columns=["target"]), "y": train_df["target"]}
-    inference_df = load_data({"type": "csv", "path": str(inference_csv)}, format="pandas")
-    results = run_pipeline_local(
-        config,
-        project_root=model_root,
-        base_path=model_root / "artifacts",
-        train={"train_data": train_data},
-        inference={"inference_data": inference_df},
-    )
-    assert len(results["inference"]) == 3
-    print("✓ procedural prediction (load_data)")
-
-
-def test_local_spark_runner():
-    """Test LocalSparkRunner in direct mode (in-process, no packaging)."""
-    from mlplatform.local import load_pipeline_config, run_pipeline_local
-
-    import pandas as pd
-
-    config = load_pipeline_config(
-        dag_path=model_root / "pipeline/dags/train_infer.yaml",
-        steps_dir=model_root / "pipeline/steps",
-        env="local_spark",
-    )
-    train_csv = model_root / "data" / "sample_train.csv"
-    inference_csv = model_root / "data" / "sample_inference.csv"
-    train_df = pd.read_csv(train_csv)
-    train_data = {"X": train_df.drop(columns=["target"]), "y": train_df["target"]}
-    inference_df = pd.read_csv(inference_csv)
-    results = run_pipeline_local(
-        config,
-        project_root=model_root,
-        base_path=model_root / "artifacts",
-        train={"train_data": train_data},
-        inference={"inference_data": inference_df},
-    )
-    assert "train" in results
-    assert "inference" in results
-    print("✓ LocalSparkRunner (direct mode)")
+    assert "prediction" in result.columns, "Missing prediction column"
+    assert len(result) == 5
+    print("PASS test_run_prediction")
 
 
 def test_build_package():
@@ -150,79 +75,72 @@ def test_build_package():
     out = build_root_zip(
         project_root=monorepo_root,
         model_package="example_model",
-        output_dir=model_root / "dist",
+        output_dir=monorepo_root / "test_dist",
     )
     assert out.exists()
     assert out.suffix == ".zip"
-    print(f"✓ build_root_zip -> {out}")
+    print(f"PASS test_build_package -> {out}")
 
 
-def test_run_spark_step():
-    """Test run_spark_step with packages (simulates main.py --packages root.zip)."""
-    from mlplatform.spark.config_serializer import write_run_config
-    from mlplatform.spark.main import run_spark_step
-    from mlplatform.spark.packager import build_root_zip
+def test_config_serializer():
+    """Test config serialization for Spark main.py consumption."""
+    from mlplatform.config.loader import load_workflow_config
+    from mlplatform.spark.config_serializer import write_workflow_config
 
-    from mlplatform.local import load_pipeline_config
+    dag_path = monorepo_root / "template_training_dag.yaml"
+    workflow = load_workflow_config(dag_path)
+    model_cfg = workflow.models[0]
 
-    build_root_zip(
-        project_root=monorepo_root,
-        model_package="example_model",
-        output_dir=model_root / "dist",
+    config_path = monorepo_root / "test_dist" / "run_config.json"
+    write_workflow_config(workflow, model_cfg, config_path, base_path=str(monorepo_root / "test_artifacts"), version="test_v1")
+    assert config_path.exists()
+
+    import json
+    with open(config_path) as f:
+        data = json.load(f)
+    assert data["runtime_config"]["feature_name"] == "eds"
+    assert data["runtime_config"]["model_name"] == "lr_p708"
+    print("PASS test_config_serializer")
+
+
+def test_pyspark_batch_prediction():
+    """Test PySpark local batch prediction via spark/main.py mapInPandas."""
+    from mlplatform.config.loader import load_workflow_config
+    from mlplatform.spark.config_serializer import write_workflow_config
+    from mlplatform.spark.main import _run_spark_inference
+
+    artifacts_dir = monorepo_root / "test_artifacts"
+
+    dag_pred = load_workflow_config(monorepo_root / "template_prediction_dag.yaml")
+    pred_model = dag_pred.models[0]
+    config_path = monorepo_root / "test_dist" / "spark_pred_config.json"
+    write_workflow_config(dag_pred, pred_model, config_path, base_path=str(artifacts_dir), version="test_v1")
+
+    X_test, _ = make_classification(n_samples=10, n_features=5, random_state=99)
+    csv_path = monorepo_root / "test_dist" / "spark_input.csv"
+    pd.DataFrame(X_test, columns=["f0", "f1", "f2", "f3", "f4"]).to_csv(csv_path, index=False)
+
+    output_path = str(monorepo_root / "test_dist" / "spark_predictions.parquet")
+    _run_spark_inference(
+        config_path=str(config_path),
+        input_path=str(csv_path),
+        output_path=output_path,
     )
-    root_zip = model_root / "dist" / "root.zip"
 
-    config = load_pipeline_config(
-        dag_path=model_root / "pipeline/dags/train_infer.yaml",
-        steps_dir=model_root / "pipeline/steps",
-        env="dev",
-    )
-    from mlplatform.config.loader import _env_data_to_config
-    from mlplatform.config.schema import RunConfig
-
-    step = next(s for s in config.steps if s.name == "train")
-    env_data = step.envs.get(config.env) or step.envs.get("dev") or {}
-    env_config = _env_data_to_config(env_data)
-    run_config = RunConfig(
-        step=step,
-        pipeline_name=config.pipeline_name,
-        model_name=config.model_name,
-        version=config.version,
-        feature=config.feature,
-        env_config=env_config,
-        custom=step.custom,
-    )
-    config_path = model_root / "dist" / "run_config.json"
-    write_run_config(run_config, config_path, base_path=str(model_root / "artifacts"))
-
-    import pandas as pd
-    from sklearn.datasets import make_classification
-
-    X, y = make_classification(n_samples=30, n_features=5, random_state=42)
-    train_csv = model_root / "dist" / "train_input.csv"
-    pd.DataFrame(X, columns=["f0", "f1", "f2", "f3", "f4"]).assign(target=y).to_csv(train_csv, index=False)
-
-    result = run_spark_step(
-        str(config_path),
-        step_name="train",
-        packages=str(root_zip),
-        input_path=str(train_csv),
-    )
-    assert result is not None
-    print(f"✓ run_spark_step (train with root.zip): {type(result).__name__}")
+    result = pd.read_parquet(output_path)
+    assert "prediction" in result.columns, "Missing prediction column"
+    assert len(result) == 10, f"Expected 10 rows, got {len(result)}"
+    print("PASS test_pyspark_batch_prediction")
 
 
 def main():
-    print("Testing example_model...\n")
-    test_load_data_csv()
-    test_load_config()
-    test_run_pipeline_local()
-    test_procedural_prediction_csv()
-    test_procedural_prediction_load_data()
-    test_local_spark_runner()
+    print("Testing example_model with simplified mlplatform API...\n")
+    test_run_training_workflow()
+    test_run_prediction()
     test_build_package()
-    test_run_spark_step()
-    print("\nAll example_model tests passed.")
+    test_config_serializer()
+    test_pyspark_batch_prediction()
+    print("\nAll tests passed.")
 
 
 if __name__ == "__main__":

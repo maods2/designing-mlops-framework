@@ -1,6 +1,18 @@
-"""Prediction: MyPredictor - implements BasePredictor."""
+"""Prediction: MyPredictor - implements BasePredictor.
 
+Run directly for local development/debugging:
+    python example_model/predict.py
+    python -m example_model.predict
+"""
+
+import sys
+from pathlib import Path
 from typing import Any
+
+_repo_root = Path(__file__).resolve().parent.parent
+for _p in [str(_repo_root), str(_repo_root / "mlplatform")]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import pandas as pd
 
@@ -10,26 +22,25 @@ import example_model.constants as cons
 
 
 class MyPredictor(BasePredictor):
-    """Load model and scaler, run predictions on inference data.
-
-    Implements BasePredictor for both local and Spark mapInPandas execution.
-    Accesses self.context (ExecutionContext) for storage and runtime_config.
-    """
+    """Load model and scaler, run predictions on inference data."""
 
     def load_model(self) -> Any:
-        """Load model and scaler from storage using context."""
-        ctx = self.context
-        storage = ctx.storage
-        runtime = ctx.runtime_config
-
-        feature_name = runtime.get("feature_name", "default")
-        model_name = runtime.get("model_name", "default")
-        version = runtime.get("version", "dev")
-        base_path = f"{feature_name}/{model_name}/{version}"
-
-        self._model = storage.load(f"{base_path}/{cons.MODEL_ARTIFACT}")
-        self._scaler = storage.load(f"{base_path}/{cons.SCALER_ARTIFACT}")
+        """Load model and scaler from storage using context helpers."""
+        self._model = self.context.load_artifact(cons.MODEL_ARTIFACT)
+        self._scaler = self.context.load_artifact(cons.SCALER_ARTIFACT)
         return self._model
+
+    def _load_input_data(self) -> pd.DataFrame:
+        """Load prediction input data. DS is responsible for this implementation.
+
+        Override or adapt this to load from CSV, Parquet, BigQuery, GCS, etc.
+        """
+        data_path = self.context.optional_configs.get(
+            "prediction_data_path",
+            str(Path(__file__).parent / "data" / "sample_inference.csv"),
+        )
+        self.context.log.info("Loading input data from %s", data_path)
+        return pd.read_csv(data_path)
 
     def predict_chunk(self, data: Any) -> pd.DataFrame:
         """Run prediction on a chunk of data."""
@@ -46,3 +57,16 @@ class MyPredictor(BasePredictor):
         X_scaled = scaler.transform(X)
         predictions = model.predict(X_scaled)
         return df.assign(prediction=predictions)
+
+
+if __name__ == "__main__":
+    from mlplatform.runner import dev_context
+
+    ctx = dev_context("template_prediction_dag.yaml")
+    predictor = MyPredictor()
+    predictor.context = ctx
+    predictor.load_model()
+
+    input_df = predictor._load_input_data()
+    result = predictor.predict_chunk(input_df)
+    print(result)

@@ -15,4 +15,4 @@ build/
 example_model/artifacts
 **/dist/
 
-*.csv
+# *.csv

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlplatform"
+version = "0.1.0"
+description = "Production-ready MLOps framework with pluggable backends"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyyaml>=6.0",
+    "scikit-learn>=1.0",
+    "pandas>=1.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.22",
+    "joblib>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+mlplatform = "mlplatform.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mlplatform*"]

@@ -1,0 +1,26 @@
+name: train
+type: train
+module: template_model.train
+class: MyTrain
+# Env-injected config (per dev/qa/prod)
+envs:
+  dev:
+    runner: LocalRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+  local_spark:
+    runner: LocalSparkRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+    runner_config:
+      direct: true
+      model_package: template_model
+  prod:
+    runner: DataprocSparkRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+    runner_config:
+      cluster: my-dataproc-cluster
+      model_package: template_model
+# Optional - DS custom, passed via context.custom
+max_iter: 1000

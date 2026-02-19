@@ -1,0 +1,23 @@
+name: inference
+type: inference
+module: template_model.predict
+class: MyInference
+envs:
+  dev:
+    runner: LocalRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+  local_spark:
+    runner: LocalSparkRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+    runner_config:
+      direct: true
+      model_package: template_model
+  prod:
+    runner: LocalSparkRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+    runner_config:
+      direct: false
+      model_package: template_model

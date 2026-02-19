@@ -1,0 +1,9 @@
+name: preprocess
+type: preprocess
+module: template_model.train
+class: MyPreprocess
+envs:
+  dev:
+    runner: LocalRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker

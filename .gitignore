@@ -1,0 +1,18 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Artifacts and dist (under each model project, e.g. template_model/)
+**/artifacts/
+**/dist/
+
+*.csv

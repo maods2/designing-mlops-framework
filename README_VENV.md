@@ -34,24 +34,27 @@ mlplatform run --dag train_infer --env dev \
   --inference-data data/sample_inference.csv
 ```
 
-## Spark/Dataproc Execution (Local Testing)
+## Spark/Dataproc Execution
 
-All outputs under template_model/:
+**Local execution** (no main.py, in-process):
+```bash
+# Run pipeline locally - uses LocalSparkRunner with direct=True
+mlplatform run --dag train_infer --env local_spark --train-data ... --inference-data ...
+```
 
+**Cloud execution** (main.py used only for spark-submit):
 ```bash
 # 1. Build root.zip -> template_model/dist/
 mlplatform build-package --project-root .
 
-# 2. Run step (run_config.json and root.zip in template_model/dist/)
-mlplatform run-spark-main --config template_model/dist/run_config.json \
-  --packages template_model/dist/root.zip --step-name train \
-  --input-path template_model/data/sample_train.csv
+# 2. Submit to Dataproc (inference uses mapInPandas for distributed prediction)
+spark-submit main.py --py-files root.zip -- \
+  --config gs://bucket/run_config.json \
+  --input-path gs://bucket/input.csv \
+  --output-path gs://bucket/output/
 ```
 
-**Dataproc format** (base_path injected by orchestrator):
-```
-spark-submit main.py --py-files root.zip -- --config gs://bucket/config.json
-```
+main.py is an auxiliary job for cloud submission only. It drives distributed inference via mapInPandas. For local runs, the step executes in-process without main.py.
 
 **Environment configs** are defined per step in `pipeline/steps/*.yaml` under `envs:` (dev, local_spark, prod, etc.). base_path is injected by orchestrator.
 

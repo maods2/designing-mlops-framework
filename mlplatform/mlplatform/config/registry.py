@@ -1,5 +1,7 @@
 """Registry for pluggable Runner, Storage, and ETB backends."""
 
+from __future__ import annotations
+
 from typing import Any, Type
 
 from mlplatform.etb.base import ExperimentTracker

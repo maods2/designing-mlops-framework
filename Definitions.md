@@ -33,7 +33,7 @@ Responsabilities:
     - TrainStep
         - Execution mode:
             - Procedural (Local)
-            - Batch (Dataproc)
+            - Procedural (Dataproc)
     - InferenceStep
         - Execution mode:
             - Procedural (Local)
@@ -90,3 +90,9 @@ k | OnlineREST (Vertex AI)            (for InferenceStep)
                     ▼
             Step(context).run()
 ```
+
+
+
+Enviroments - local | dev (cloud) | qa (cloud) | prod (cloud)
+
+The Runner, Storage, Tracker, 

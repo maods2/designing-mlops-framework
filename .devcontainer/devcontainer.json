@@ -13,7 +13,8 @@
                 "ryanluker.vscode-coverage-gutters",
                 "ms-toolsai.jupyter",
                 "ms-vscode.cpptools-extension-pack",
-                "ms-vscode.cmake-tools"
+                "ms-vscode.cmake-tools",
+                "bierner.markdown-mermaid"
             ]
         }
     },

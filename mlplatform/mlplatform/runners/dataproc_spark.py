@@ -93,8 +93,18 @@ class DataprocSparkRunner(Runner):
             f"--py-files={packages_arg}",
             "--",
             f"--config={config_arg}",
-            f"--step-name={run_config.step.name}",
         ]
+        if run_config.step.type == "inference":
+            input_path = kwargs.get("input_path")
+            if not input_path:
+                raise ValueError("input_path required for inference (e.g. gs://bucket/data.csv)")
+            cmd.extend([f"--input-path={input_path}"])
+            if kwargs.get("output_path"):
+                cmd.append(f"--output-path={kwargs['output_path']}")
+        else:
+            cmd.append(f"--step-name={run_config.step.name}")
+            if kwargs.get("input_path"):
+                cmd.append(f"--input-path={kwargs['input_path']}")
         if self.region:
             cmd.insert(-1, f"--region={self.region}")
         if self.project:

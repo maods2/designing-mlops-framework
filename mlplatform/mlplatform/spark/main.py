@@ -1,22 +1,26 @@
 """
-Entry point for Spark/Dataproc cluster execution.
+Entry point for Spark/Dataproc cluster execution (cloud only).
 
 Invocation format (Dataproc/Spark):
-  spark-submit main.py --py-files root.zip -- --config <path> [--step-name <name>]
+  spark-submit main.py --py-files root.zip -- --config <path> --input-path <path> [--output-path <path>]
 
-Invocation format (local testing - no Spark):
-  python main.py --config <path> [--packages root.zip] [--step-name <name>]
+main.py is an auxiliary job used ONLY during cloud job submission. It drives distributed
+prediction via mapInPandas, passing the user's predictor class to each partition.
 
-Config path can be local (./config.json) or GCS (gs://bucket/path/config.json).
+For local execution: use LocalRunner or LocalSparkRunner with direct=True. Do NOT run
+main.py locally - it requires Spark and is intended for cluster submission only.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+import pandas as pd
 
 
 def _add_packages_to_path(packages: str) -> None:
@@ -27,7 +31,6 @@ def _add_packages_to_path(packages: str) -> None:
             continue
         path = Path(p)
         if path.suffix == ".zip" and path.exists():
-            # Insert at beginning so model package takes precedence
             sys.path.insert(0, str(path.resolve()))
 
 
@@ -37,7 +40,7 @@ def _load_config(config_path: str) -> dict[str, Any]:
         try:
             from google.cloud import storage
 
-            parts = config_path[5:].split("/", 1)  # gs://bucket/path
+            parts = config_path[5:].split("/", 1)
             bucket_name, blob_path = parts[0], parts[1]
             client = storage.Client()
             bucket = client.bucket(bucket_name)
@@ -45,7 +48,9 @@ def _load_config(config_path: str) -> dict[str, Any]:
             content = blob.download_as_text()
             return json.loads(content)
         except ImportError:
-            raise RuntimeError("google-cloud-storage required for GCS config. pip install google-cloud-storage")
+            raise RuntimeError(
+                "google-cloud-storage required for GCS config. pip install google-cloud-storage"
+            )
     path = Path(config_path)
     if not path.exists():
         raise FileNotFoundError(f"Config not found: {config_path}")
@@ -58,15 +63,146 @@ def _resolve_storage(config: dict[str, Any]):
     from mlplatform.config.registry import get_storage
 
     env = config.get("env_config", {})
-    return get_storage(env.get("storage", "LocalFileSystem"), base_path=env.get("base_path", "./artifacts"))
+    return get_storage(
+        env.get("storage", "LocalFileSystem"),
+        base_path=env.get("base_path", "./artifacts"),
+    )
 
 
-def _resolve_etb(config: dict[str, Any]):
-    """Instantiate ETB from config."""
-    from mlplatform.config.registry import get_etb
+def _make_map_in_pandas_fn(
+    predictor_cls: type,
+    config: dict[str, Any],
+) -> Any:
+    """
+    Build mapInPandas function that loads model per partition and runs predict_chunk.
 
-    env = config.get("env_config", {})
-    return get_etb(env.get("etb", "LocalJsonTracker"), base_path=env.get("base_path", "./artifacts"))
+    The predictor class must implement load_model(storage, path) and predict_chunk(data).
+    predict_chunk receives a pandas DataFrame and must return a pandas DataFrame
+    (with predictions added).
+    """
+
+    def predict_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
+        storage = _resolve_storage(config)
+        feature = config.get("feature", config.get("model_name", "default"))
+        model_name = config.get("model_name", "default")
+        version = config.get("version", "dev")
+        model_path = f"{feature}/{model_name}/{version}/model.pkl"
+
+        predictor = predictor_cls()
+        model = predictor.load_model(storage, model_path)
+
+        for batch in iterator:
+            result = predictor.predict_chunk(batch)
+            if not isinstance(result, pd.DataFrame):
+                result = pd.DataFrame({"prediction": result})
+            yield result
+
+    return predict_partition
+
+
+def _run_spark_inference(
+    config_path: str,
+    input_path: str | None = None,
+    input_source: dict[str, Any] | None = None,
+    output_path: str | None = None,
+    packages: str | None = None,
+) -> None:
+    """
+    Run distributed inference via Spark mapInPandas.
+
+    Reads input from input_path (CSV/Parquet) or input_source (e.g. BigQuery),
+    applies predictor via mapInPandas, writes to output_path if provided.
+    """
+    from pyspark.sql import SparkSession
+
+    if packages:
+        _add_packages_to_path(packages)
+
+    config = _load_config(config_path)
+    step_config = config.get("step", {})
+    mod = importlib.import_module(step_config["module"])
+    predictor_cls = getattr(mod, step_config["class_name"])
+
+    if not hasattr(predictor_cls, "load_model") or not hasattr(predictor_cls, "predict_chunk"):
+        raise TypeError(
+            f"Predictor {predictor_cls.__name__} must implement load_model and predict_chunk "
+            "for Spark mapInPandas. See BasePredictor."
+        )
+
+    spark = SparkSession.builder.appName("MLPlatform-Spark-Inference").getOrCreate()
+
+    # Read input - from path or data source config
+    if input_source:
+        from mlplatform.data import load_data
+
+        sdf = load_data(input_source, format="spark", spark=spark)
+    elif input_path:
+        if input_path.lower().endswith(".parquet"):
+            sdf = spark.read.parquet(input_path)
+        else:
+            sdf = spark.read.option("header", "true").csv(input_path)
+    else:
+        raise ValueError("Either input_path or input_source required for inference")
+
+    predict_fn = _make_map_in_pandas_fn(predictor_cls, config)
+    # Schema: input columns + prediction (predictor returns input.assign(prediction=...))
+    from pyspark.sql.types import DoubleType
+
+    result_schema = sdf.schema.add("prediction", DoubleType())
+
+    result = sdf.mapInPandas(predict_fn, schema=result_schema)
+
+    if output_path:
+        result.write.mode("overwrite").parquet(output_path)
+        print(f"Wrote predictions to {output_path}")
+    else:
+        result.show()
+
+
+def run_spark_step(
+    config_path: str,
+    step_name: str | None = None,
+    packages: str | None = None,
+    input_path: str | None = None,
+    input_source: dict[str, Any] | None = None,
+    **step_kwargs: Any,
+) -> Any:
+    """
+    Run a single step from serialized config. Used for LOCAL execution only.
+
+    For inference: when running locally (LocalSparkRunner direct=True), this runs
+    the step in-process without Spark. Do NOT use for cloud - cloud uses
+    _run_spark_inference with mapInPandas instead.
+    """
+    import importlib
+
+    if packages:
+        _add_packages_to_path(packages)
+    config = _load_config(config_path)
+    if step_name:
+        config["step"] = {**config.get("step", {}), "name": step_name}
+
+    step_type = config.get("step", {}).get("type", "")
+    if input_source and step_type == "inference":
+        from mlplatform.data import load_data
+
+        step_kwargs["inference_data"] = load_data(input_source, format="pandas")
+    elif input_path:
+        if step_type == "train":
+            step_kwargs["train_data"] = _load_train_data_from_path(input_path)
+        elif step_type == "inference":
+            if input_path.lower().endswith(".parquet"):
+                step_kwargs["inference_data"] = pd.read_parquet(input_path)
+            else:
+                step_kwargs["inference_data"] = pd.read_csv(input_path)
+
+    context = _build_context_from_config(config)
+    step_config = context.run_config.step
+    mod = importlib.import_module(step_config.module)
+    cls = getattr(mod, step_config.class_name)
+    step = cls()
+    step._context = context
+    return step.run(context, **step_kwargs)
 
 
 def _build_context_from_config(config: dict[str, Any]):
@@ -101,6 +237,8 @@ def _build_context_from_config(config: dict[str, Any]):
         env_config=env_config,
         custom=step_config.custom,
     )
+    from mlplatform.spark.main import _resolve_etb, _resolve_storage
+
     storage = _resolve_storage(config)
     etb = _resolve_etb(config)
     return ExecutionContext(
@@ -117,87 +255,80 @@ def _build_context_from_config(config: dict[str, Any]):
 
 
 def _load_train_data_from_path(path: str):
-    """Load train data from CSV for train step."""
-    import pandas as pd
-
-    df = pd.read_csv(path)
+    """Load train data from CSV or Parquet for train step."""
+    if path.lower().endswith(".parquet"):
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
     if "target" not in df.columns:
-        raise ValueError(f"CSV must have 'target' column: {path}")
+        raise ValueError(f"Data must have 'target' column: {path}")
     return {"X": df.drop(columns=["target"]), "y": df["target"]}
 
 
-def run_spark_step(
-    config_path: str,
-    step_name: str | None = None,
-    packages: str | None = None,
-    input_path: str | None = None,
-    **step_kwargs: Any,
-) -> Any:
-    """
-    Run a single step from serialized config. Used by main.py entry point.
+def _resolve_etb(config: dict[str, Any]):
+    """Instantiate ETB from config."""
+    from mlplatform.config.registry import get_etb
 
-    Args:
-        config_path: Path to run config JSON (local or gs://)
-        step_name: Optional step name override
-        packages: Optional path to root.zip (adds to sys.path before import)
-        input_path: Optional path to input CSV (for train step: train_data)
-        **step_kwargs: Passed to step.run()
-
-    Returns:
-        Step result
-    """
-    import importlib
-
-    if packages:
-        _add_packages_to_path(packages)
-    config = _load_config(config_path)
-    if step_name:
-        config["step"] = {**config.get("step", {}), "name": step_name}
-
-    if input_path:
-        step_type = config.get("step", {}).get("type", "")
-        if step_type == "train":
-            step_kwargs["train_data"] = _load_train_data_from_path(input_path)
-        elif step_type == "inference":
-            import pandas as pd
-
-            step_kwargs["inference_data"] = pd.read_csv(input_path)
-
-    context = _build_context_from_config(config)
-    step_config = context.run_config.step
-    mod = importlib.import_module(step_config.module)
-    cls = getattr(mod, step_config.class_name)
-    step = cls()
-    step._context = context
-    return step.run(context, **step_kwargs)
+    env = config.get("env_config", {})
+    return get_etb(
+        env.get("etb", "LocalJsonTracker"),
+        base_path=env.get("base_path", "./artifacts"),
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="MLPlatform Spark step entry point")
+    parser = argparse.ArgumentParser(
+        description="MLPlatform Spark entry point (cloud only). Uses mapInPandas for distributed inference."
+    )
     parser.add_argument("--config", required=True, help="Path to run config JSON (local or gs://)")
-    parser.add_argument("--packages", help="Comma-separated paths to zip packages (e.g. root.zip) for local run")
-    parser.add_argument("--step-name", help="Step name override")
-    parser.add_argument("--input-path", help="Input data path (e.g. GCS path for Spark)")
-    parser.add_argument("--output-path", help="Output path for results")
+    parser.add_argument(
+        "--input-path",
+        help="Input data path (CSV or Parquet, local or gs://). Required for inference if --input-source not set.",
+    )
+    parser.add_argument(
+        "--input-source",
+        help='Data source config JSON, e.g. \'{"type":"bigquery","table":"project.dataset.table"}\'',
+    )
+    parser.add_argument("--output-path", help="Output path for predictions (Parquet)")
+    parser.add_argument(
+        "--packages",
+        help="Comma-separated paths to zip packages (e.g. root.zip) - for local Spark testing",
+    )
+    parser.add_argument("--step-name", help="Step name override (ignored for inference)")
     args, unknown = parser.parse_known_args()
 
     if args.packages:
         _add_packages_to_path(args.packages)
 
-    step_kwargs = {}
-    if args.output_path:
-        step_kwargs["output_path"] = args.output_path
+    config = _load_config(args.config)
+    step_type = config.get("step", {}).get("type", "inference")
 
     try:
-        result = run_spark_step(
-            args.config,
-            step_name=args.step_name,
-            packages=args.packages,
-            input_path=args.input_path,
-            **step_kwargs,
-        )
-        print(f"Step completed: {result}")
-        return 0
+        if step_type == "inference":
+            input_source = None
+            if getattr(args, "input_source", None):
+                input_source = json.loads(args.input_source)
+            if not args.input_path and not input_source:
+                print("--input-path or --input-source required for inference", file=sys.stderr)
+                return 1
+            _run_spark_inference(
+                args.config,
+                input_path=args.input_path,
+                input_source=input_source,
+                output_path=args.output_path,
+                packages=args.packages,
+            )
+            return 0
+        else:
+            # Train: run in-process (driver) - for small datasets
+            result = run_spark_step(
+                args.config,
+                step_name=args.step_name,
+                packages=args.packages,
+                input_path=args.input_path,
+            )
+            print(f"Step completed: {result}")
+            return 0
     except Exception as e:
         print(f"Step failed: {e}", file=sys.stderr)
         raise

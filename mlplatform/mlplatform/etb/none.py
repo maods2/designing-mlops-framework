@@ -1,5 +1,7 @@
 """No-op experiment tracker."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from mlplatform.etb.base import ExperimentTracker

@@ -1,0 +1,15 @@
+pipeline:
+  name: example_pipeline
+  feature: example
+  model_name: example_model
+  version: null
+  steps:
+    - name: train
+      type: train
+      module: example_model.train
+      class: MyTrain
+
+    - name: inference
+      type: inference
+      module: example_model.predict
+      class: MyInference

@@ -1,4 +1,4 @@
-"""Local Spark runner - simulate Dataproc execution locally for testing."""
+"""Local Spark runner - run steps locally without main.py."""
 
 from __future__ import annotations
 
@@ -19,12 +19,14 @@ from mlplatform.spark.packager import build_root_zip
 
 class LocalSparkRunner(Runner):
     """
-    Execute steps locally, simulating the Dataproc/Spark invocation format.
+    Execute steps locally in-process. Does NOT use main.py.
 
-    Two modes:
-    1. direct=True: Run step in-process via run_spark_step() (no Spark, fast)
-    2. direct=False: Run main.py with --packages root.zip (full simulation)
-    3. spark_submit=True: Run spark-submit --master local[*] (requires Spark)
+    main.py is an auxiliary job used ONLY during cloud job submission
+    (spark-submit). For local execution we run the step directly.
+
+    Modes:
+    1. direct=True (default): Run step in-process via run_spark_step() (no Spark, fast)
+    2. spark_submit=True: Run spark-submit with main.py for local testing of cloud flow
     """
 
     def __init__(
@@ -40,7 +42,7 @@ class LocalSparkRunner(Runner):
         self.model_package = model_package
 
     def _default_main_script(self) -> Path:
-        """Path to framework's main.py."""
+        """Path to framework's main.py (used only for spark_submit cloud simulation)."""
         import mlplatform.spark.main as spark_main
 
         return Path(spark_main.__file__).resolve()
@@ -55,7 +57,7 @@ class LocalSparkRunner(Runner):
         monorepo_root = project_root.parent
 
         if self.direct and not self.spark_submit:
-            # Fast path: run in-process, no packaging (supports kwargs like train_data)
+            # Local path: run in-process, no main.py, no packaging
             from mlplatform.spark.config_serializer import run_config_to_dict
             import tempfile
             import json
@@ -69,7 +71,7 @@ class LocalSparkRunner(Runner):
             finally:
                 Path(config_path).unlink(missing_ok=True)
 
-        # Full simulation: build root.zip, run main.py
+        # Optional: spark-submit with main.py for local testing of cloud flow
         dist_dir = project_root / "dist"
         base_path = str(project_root / "artifacts")
         root_zip = build_root_zip(

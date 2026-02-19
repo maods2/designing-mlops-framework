@@ -4,13 +4,17 @@ import argparse
 from pathlib import Path
 
 
-def _load_train_data_from_csv(path: Path):
-    """Load train data from CSV. Expects 'target' column for y, rest for X."""
+def _load_train_data_from_path(path: Path):
+    """Load train data from CSV or Parquet. Expects 'target' column for y, rest for X."""
     import pandas as pd
 
-    df = pd.read_csv(path)
+    path_str = str(path)
+    if path_str.lower().endswith(".parquet"):
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
     if "target" not in df.columns:
-        raise ValueError(f"CSV must have 'target' column: {path}")
+        raise ValueError(f"Data must have 'target' column: {path}")
     X = df.drop(columns=["target"])
     y = df["target"]
     return {"X": X, "y": y}
@@ -26,8 +30,12 @@ def main() -> None:
     run_parser.add_argument("--steps-dir", help="Steps config directory (default: <dag_dir>/../steps)")
     run_parser.add_argument("--version", help="Model version (default: from config or 'dev')")
     run_parser.add_argument("--project-root", default="template_model", help="Model project root (e.g. template_model)")
-    run_parser.add_argument("--train-data", help="Path to train CSV (must have 'target' column)")
+    run_parser.add_argument("--train-data", help="Path to train CSV/Parquet (must have 'target' column)")
     run_parser.add_argument("--inference-data", help="Path to inference CSV")
+    run_parser.add_argument(
+        "--inference-source",
+        help='Data source config JSON, e.g. \'{"type":"bigquery","table":"project.dataset.table"}\'',
+    )
 
     build_parser = subparsers.add_parser("build-package", help="Build root.zip for Spark/Dataproc deployment")
     build_parser.add_argument("--model-package", default="template_model", help="Model package name")
@@ -36,12 +44,16 @@ def main() -> None:
 
     run_spark_parser = subparsers.add_parser(
         "run-spark-main",
-        help="Run main.py with root.zip (local simulation of Dataproc format)",
+        help="Run step locally in-process (no main.py). For cloud use spark-submit main.py.",
     )
     run_spark_parser.add_argument("--config", required=True, help="Path to run_config.json")
     run_spark_parser.add_argument("--packages", required=True, help="Path to root.zip")
     run_spark_parser.add_argument("--step-name", help="Step name override")
-    run_spark_parser.add_argument("--input-path", help="Input CSV path (for train or inference)")
+    run_spark_parser.add_argument("--input-path", help="Input CSV/Parquet path (for train or inference)")
+    run_spark_parser.add_argument(
+        "--input-source",
+        help='Data source config JSON, e.g. \'{"type":"bigquery","table":"project.dataset.table"}\'',
+    )
 
     args = parser.parse_args()
 
@@ -73,12 +85,23 @@ def main() -> None:
         step_kwargs = {}
         if args.train_data:
             train_path = Path(args.train_data) if Path(args.train_data).is_absolute() else project_root / args.train_data
-            step_kwargs["train"] = {"train_data": _load_train_data_from_csv(train_path)}
-        if args.inference_data:
+            step_kwargs["train"] = {"train_data": _load_train_data_from_path(train_path)}
+        if args.inference_source:
+            import json
+
+            from mlplatform.data import load_data
+
+            source_config = json.loads(args.inference_source)
+            inference_df = load_data(source_config, format="pandas")
+            step_kwargs["inference"] = {"inference_data": inference_df}
+        elif args.inference_data:
             import pandas as pd
 
             inf_path = Path(args.inference_data) if Path(args.inference_data).is_absolute() else project_root / args.inference_data
-            step_kwargs["inference"] = {"inference_data": pd.read_csv(inf_path)}
+            if str(inf_path).lower().endswith(".parquet"):
+                step_kwargs["inference"] = {"inference_data": pd.read_parquet(inf_path)}
+            else:
+                step_kwargs["inference"] = {"inference_data": pd.read_csv(inf_path)}
 
         results = run_pipeline_local(config, project_root=project_root, base_path=project_root / "artifacts", **step_kwargs)
         for step_name, result in results.items():
@@ -97,13 +120,19 @@ def main() -> None:
         print(f"Built: {out}")
 
     elif args.command == "run-spark-main":
+        import json
+
         from mlplatform.spark.main import run_spark_step
 
+        input_source = None
+        if getattr(args, "input_source", None):
+            input_source = json.loads(args.input_source)
         result = run_spark_step(
             args.config,
             step_name=getattr(args, "step_name", None),
             packages=getattr(args, "packages", None),
             input_path=getattr(args, "input_path", None),
+            input_source=input_source,
         )
         print(f"Result: {result}")
 

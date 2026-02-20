@@ -2,9 +2,13 @@
 
 Usage:
   Local:  python main.py --config <path.json>
-  Cloud:  spark-submit main.py --py-files root.zip -- --config <path.json> [--input-path <path>] [--output-path <path>]
+  Cloud:  spark-submit main.py --py-files root.zip -- --config <path.json>
 
 The config JSON is produced by config_serializer.write_workflow_config().
+This module is kept simple and flexible: it loads zip-packaged DS model code
+dynamically and dispatches to either training or prediction via the profile
+system. The same entry point works for both local Spark and cloud Spark
+(Dataproc / VertexAI).
 """
 
 from __future__ import annotations
@@ -15,8 +19,6 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
-
-import pandas as pd
 
 
 def _add_packages_to_path(packages: str) -> None:
@@ -55,25 +57,57 @@ def _load_config(config_path: str) -> dict[str, Any]:
 
 
 def _build_context_from_config(config: dict[str, Any]):
-    """Build an ExecutionContext from the serialized run config JSON."""
+    """Build an ExecutionContext using the profile system."""
+    from mlplatform.core.artifact_registry import ArtifactRegistry
     from mlplatform.core.context import ExecutionContext
     from mlplatform.log import get_logger
-    from mlplatform.storage.local import LocalFileSystem
-    from mlplatform.tracking.local import LocalJsonTracker
+    from mlplatform.profiles.registry import get_profile
 
     runtime = config.get("runtime_config", {})
     env_meta = config.get("environment_metadata", {})
     base_path = env_meta.get("base_path", "./artifacts")
+    profile_name = env_meta.get("profile", "local")
 
+    prof = get_profile(profile_name)
+    storage = prof.storage_factory(base_path)
+    tracker = prof.tracker_factory(base_path)
+
+    feature = runtime.get("feature_name", "default")
+    model = runtime.get("model_name", "default")
+    ver = runtime.get("version", "dev")
+
+    registry = ArtifactRegistry(
+        storage=storage, feature_name=feature, model_name=model, version=ver,
+    )
     return ExecutionContext(
-        storage=LocalFileSystem(base_path=base_path),
-        experiment_tracker=LocalJsonTracker(base_path=base_path),
-        feature_name=runtime.get("feature_name", "default"),
-        model_name=runtime.get("model_name", "default"),
-        version=runtime.get("version", "dev"),
+        artifacts=registry,
+        experiment_tracker=tracker,
+        feature_name=feature,
+        model_name=model,
+        version=ver,
         optional_configs=runtime.get("optional_configs", {}),
-        log=get_logger(f"mlplatform.spark.{runtime.get('model_name', 'default')}"),
+        log=get_logger(f"mlplatform.spark.{model}"),
         _pipeline_type=runtime.get("pipeline_type", ""),
+    )
+
+
+def _build_model_cfg_from_config(config: dict[str, Any]):
+    """Reconstruct a ModelConfig from the serialized runtime config."""
+    from mlplatform.config.schema import ModelConfig
+
+    runtime = config.get("runtime_config", {})
+    return ModelConfig(
+        model_name=runtime.get("model_name", "default"),
+        module=runtime.get("module", ""),
+        compute=runtime.get("compute", "s"),
+        platform=runtime.get("platform", "VertexAI"),
+        optional_configs=runtime.get("optional_configs", {}),
+        model_version=runtime.get("model_version", "latest"),
+        input_path=runtime.get("input_path"),
+        output_path=runtime.get("output_path"),
+        prediction_dataset_name=runtime.get("prediction_dataset_name"),
+        prediction_table_name=runtime.get("prediction_table_name"),
+        prediction_output_dataset_table=runtime.get("prediction_output_dataset_table"),
     )
 
 
@@ -91,12 +125,8 @@ def _resolve_class_from_config(config: dict[str, Any], base_class: type) -> type
     raise ImportError(f"No {base_class.__name__} subclass found in {module_path}")
 
 
-def _run_spark_training(config_path: str, packages: str | None = None) -> None:
+def _run_spark_training(config: dict[str, Any]) -> None:
     """Run training on the Spark driver (in-process)."""
-    if packages:
-        _add_packages_to_path(packages)
-
-    config = _load_config(config_path)
     from mlplatform.core.trainer import BaseTrainer
 
     ctx = _build_context_from_config(config)
@@ -108,40 +138,24 @@ def _run_spark_training(config_path: str, packages: str | None = None) -> None:
     ctx.log.info("Spark training completed")
 
 
-def _run_spark_inference(
-    config_path: str,
-    input_path: str | None = None,
-    output_path: str | None = None,
-    packages: str | None = None,
-) -> None:
+def _run_spark_inference(config: dict[str, Any]) -> None:
     """Run distributed inference via SparkBatchInvocation."""
-    if packages:
-        _add_packages_to_path(packages)
-
-    if not input_path:
-        raise ValueError("--input-path required for inference")
-
-    config = _load_config(config_path)
     from mlplatform.core.predictor import BasePredictor
     from mlplatform.invocation.spark_batch import SparkBatchInvocation
 
     ctx = _build_context_from_config(config)
+    model_cfg = _build_model_cfg_from_config(config)
     predictor_cls = _resolve_class_from_config(config, BasePredictor)
     predictor = predictor_cls()
     predictor.context = ctx
 
-    invocation = SparkBatchInvocation(
-        input_path=input_path,
-        output_path=output_path,
-    )
-    invocation.invoke(predictor, ctx)
+    invocation = SparkBatchInvocation()
+    invocation.invoke(predictor, ctx, model_cfg)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="MLPlatform Spark entry point.")
     parser.add_argument("--config", required=True, help="Path to run config JSON (local or gs://)")
-    parser.add_argument("--input-path", help="Input data path (CSV or Parquet)")
-    parser.add_argument("--output-path", help="Output path for predictions (Parquet)")
     parser.add_argument("--packages", help="Comma-separated paths to zip packages (e.g. root.zip)")
     args, _ = parser.parse_known_args()
 
@@ -153,17 +167,9 @@ def main() -> int:
 
     try:
         if pipeline_type in ("prediction", "inference"):
-            if not args.input_path:
-                print("--input-path required for inference", file=sys.stderr)
-                return 1
-            _run_spark_inference(
-                args.config,
-                input_path=args.input_path,
-                output_path=args.output_path,
-                packages=args.packages,
-            )
+            _run_spark_inference(config)
         else:
-            _run_spark_training(args.config, packages=args.packages)
+            _run_spark_training(config)
         return 0
     except Exception as e:
         print(f"Step failed: {e}", file=sys.stderr)

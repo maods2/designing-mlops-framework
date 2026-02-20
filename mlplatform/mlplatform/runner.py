@@ -10,6 +10,7 @@ from typing import Any
 
 from mlplatform.config.loader import load_workflow_config
 from mlplatform.config.schema import ModelConfig, WorkflowConfig
+from mlplatform.core.artifact_registry import ArtifactRegistry
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
 from mlplatform.core.trainer import BaseTrainer
@@ -93,8 +94,14 @@ def _build_context(
     storage = prof.storage_factory(base)
     tracker = prof.tracker_factory(base)
     log = get_logger(f"mlplatform.{model_cfg.model_name}", workflow.log_level)
-    return ExecutionContext(
+    registry = ArtifactRegistry(
         storage=storage,
+        feature_name=workflow.feature_name,
+        model_name=model_cfg.model_name,
+        version=version,
+    )
+    return ExecutionContext(
+        artifacts=registry,
         experiment_tracker=tracker,
         feature_name=workflow.feature_name,
         model_name=model_cfg.model_name,
@@ -132,4 +139,4 @@ def _run_prediction(
     predictor_cls = _resolve_class(model_cfg.module, BasePredictor)
     predictor = predictor_cls()
     predictor.context = ctx
-    return invocation.invoke(predictor, ctx)
+    return invocation.invoke(predictor, ctx, model_cfg)

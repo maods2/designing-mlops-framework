@@ -14,10 +14,12 @@ from mlplatform.invocation.fastapi_serving import FastAPIInvocation
 from mlplatform.invocation.in_process import InProcessInvocation
 from mlplatform.invocation.spark_batch import SparkBatchInvocation
 from mlplatform.storage.base import Storage
+from mlplatform.storage.gcs import GCSStorage
 from mlplatform.storage.local import LocalFileSystem
 from mlplatform.tracking.base import ExperimentTracker
 from mlplatform.tracking.local import LocalJsonTracker
 from mlplatform.tracking.none import NoneTracker
+from mlplatform.tracking.vertexai import VertexAITracker
 
 
 @dataclass
@@ -47,6 +49,10 @@ def get_profile(name: str) -> Profile:
     return _REGISTRY[name]
 
 
+# ---------------------------------------------------------------------------
+# Local profiles (no cloud dependencies)
+# ---------------------------------------------------------------------------
+
 register_profile(Profile(
     name="local",
     storage_factory=lambda bp: LocalFileSystem(bp),
@@ -62,22 +68,33 @@ register_profile(Profile(
 ))
 
 register_profile(Profile(
-    name="cloud-online",
-    storage_factory=lambda bp: LocalFileSystem(bp),
-    tracker_factory=lambda bp: LocalJsonTracker(bp),
-    invocation_strategy_factory=lambda: FastAPIInvocation(),
-))
-
-register_profile(Profile(
-    name="cloud-batch",
-    storage_factory=lambda bp: LocalFileSystem(bp),
-    tracker_factory=lambda bp: LocalJsonTracker(bp),
-    invocation_strategy_factory=lambda: SparkBatchInvocation(),
-))
-
-register_profile(Profile(
     name="cloud-batch-emulated",
     storage_factory=lambda bp: LocalFileSystem(bp),
     tracker_factory=lambda bp: LocalJsonTracker(bp),
     invocation_strategy_factory=lambda: SparkBatchInvocation(),
+))
+
+# ---------------------------------------------------------------------------
+# Cloud profiles (require google-cloud-* SDKs at runtime)
+# ---------------------------------------------------------------------------
+
+register_profile(Profile(
+    name="cloud-batch",
+    storage_factory=lambda bp: GCSStorage(bp),
+    tracker_factory=lambda bp: VertexAITracker(experiment_name=bp),
+    invocation_strategy_factory=lambda: SparkBatchInvocation(),
+))
+
+register_profile(Profile(
+    name="cloud-online",
+    storage_factory=lambda bp: GCSStorage(bp),
+    tracker_factory=lambda bp: VertexAITracker(experiment_name=bp),
+    invocation_strategy_factory=lambda: FastAPIInvocation(),
+))
+
+register_profile(Profile(
+    name="cloud-train",
+    storage_factory=lambda bp: GCSStorage(bp),
+    tracker_factory=lambda bp: VertexAITracker(experiment_name=bp),
+    invocation_strategy_factory=lambda: InProcessInvocation(),
 ))

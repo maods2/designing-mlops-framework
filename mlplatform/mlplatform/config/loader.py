@@ -42,6 +42,8 @@ def load_workflow_config(dag_path: str | Path) -> WorkflowConfig:
             predicted_timestamp_column_name=entry.get("predicted_timestamp_column_name"),
             predicted_probability_column_name=entry.get("predicted_probability_column_name"),
             unique_identifier_column=entry.get("unique_identifier_column"),
+            input_path=entry.get("input_path"),
+            output_path=entry.get("output_path"),
         ))
 
     return WorkflowConfig(

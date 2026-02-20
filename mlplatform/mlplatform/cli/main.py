@@ -12,7 +12,7 @@ def main() -> None:
     run_parser.add_argument("--dag", required=True, help="Path to DAG YAML config")
     run_parser.add_argument(
         "--profile", default="local",
-        help="Profile name (local, local-spark, cloud-batch, cloud-online, cloud-batch-emulated)",
+        help="Profile name (local, local-spark, cloud-train, cloud-online, cloud-batch, cloud-batch-emulated)",
     )
     run_parser.add_argument("--version", help="Model version (default: auto-generated)")
     run_parser.add_argument("--base-path", help="Artifact storage base path (default: ./artifacts)")

@@ -27,6 +27,8 @@ class ModelConfig:
     predicted_timestamp_column_name: str | None = None
     predicted_probability_column_name: str | None = None
     unique_identifier_column: str | None = None
+    input_path: str | None = None
+    output_path: str | None = None
 
 
 @dataclass

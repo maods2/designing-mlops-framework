@@ -8,6 +8,8 @@ models:
     serving_platform: VertexAI
     module: "example_model.predict"
     model_version: "latest"
+    input_path: "example_model/data/sample_inference.csv"
+    output_path: "artifacts/predictions.csv"
     prediction_dataset_name: dataset_name
     prediction_table_name: table_name
     prediction_output_dataset_table: dataset.output_table

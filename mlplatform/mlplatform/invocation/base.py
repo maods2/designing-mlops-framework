@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from mlplatform.config.schema import ModelConfig
     from mlplatform.core.context import ExecutionContext
     from mlplatform.core.predictor import BasePredictor
 
@@ -18,6 +19,11 @@ class InvocationStrategy(ABC):
     """
 
     @abstractmethod
-    def invoke(self, predictor: BasePredictor, context: ExecutionContext) -> Any:
-        """Execute prediction using the given predictor and context."""
+    def invoke(
+        self,
+        predictor: BasePredictor,
+        context: ExecutionContext,
+        model_cfg: ModelConfig,
+    ) -> Any:
+        """Execute prediction using the given predictor, context, and model config."""
         ...

@@ -30,18 +30,6 @@ class MyPredictor(BasePredictor):
         self._scaler = self.context.load_artifact(cons.SCALER_ARTIFACT)
         return self._model
 
-    def _load_input_data(self) -> pd.DataFrame:
-        """Load prediction input data. DS is responsible for this implementation.
-
-        Override or adapt this to load from CSV, Parquet, BigQuery, GCS, etc.
-        """
-        data_path = self.context.optional_configs.get(
-            "prediction_data_path",
-            str(Path(__file__).parent / "data" / "sample_inference.csv"),
-        )
-        self.context.log.info("Loading input data from %s", data_path)
-        return pd.read_csv(data_path)
-
     def predict_chunk(self, data: Any) -> pd.DataFrame:
         """Run prediction on a chunk of data."""
         model = getattr(self, "_model", None)
@@ -60,13 +48,12 @@ class MyPredictor(BasePredictor):
 
 
 if __name__ == "__main__":
-    from mlplatform.runner import dev_context
+    from mlplatform.runner import run_workflow
 
-    ctx = dev_context("template_prediction_dag.yaml")
-    predictor = MyPredictor()
-    predictor.context = ctx
-    predictor.load_model()
-
-    input_df = predictor._load_input_data()
-    result = predictor.predict_chunk(input_df)
-    print(result)
+    results = run_workflow(
+        dag_path="template_prediction_dag.yaml",
+        profile="local",
+        version="dev",
+    )
+    for name, status in results.items():
+        print(f"{name}: {status}")

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from mlplatform.invocation.base import InvocationStrategy
 
 if TYPE_CHECKING:
+    from mlplatform.config.schema import ModelConfig
     from mlplatform.core.context import ExecutionContext
     from mlplatform.core.predictor import BasePredictor
 
@@ -16,6 +17,8 @@ class FastAPIInvocation(InvocationStrategy):
 
     Request body: ``{"records": [{"col": val, ...}, ...]}``
     Response body: ``{"predictions": [{"col": val, "prediction": val}, ...]}``
+
+    Data arrives via HTTP requests, so ModelConfig data source fields are unused.
     """
 
     def __init__(
@@ -26,7 +29,12 @@ class FastAPIInvocation(InvocationStrategy):
         self.host = host
         self.port = port
 
-    def invoke(self, predictor: BasePredictor, context: ExecutionContext) -> Any:
+    def invoke(
+        self,
+        predictor: BasePredictor,
+        context: ExecutionContext,
+        model_cfg: ModelConfig,
+    ) -> Any:
         import pandas as pd
         import uvicorn
         from fastapi import FastAPI

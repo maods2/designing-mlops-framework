@@ -1,0 +1,5 @@
+- create a module for generate versison <timestamp-id>
+- remove registe_model
+- consolidate load_artifact vs load_artifact_from
+- improve profile adding more configurations
+- 

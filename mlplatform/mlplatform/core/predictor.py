@@ -17,7 +17,7 @@ class BasePredictor(ABC):
     @abstractmethod
     def load_model(self) -> Any:
         """Load model from storage. The predictor receives an ExecutionContext
-        (set as self.context) providing access to storage and artifact_store."""
+        (set as self.context) providing access to storage and experiment tracking."""
         ...
 
     @abstractmethod

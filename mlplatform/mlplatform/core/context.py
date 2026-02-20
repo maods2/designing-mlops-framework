@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from mlplatform.artifacts.base import ArtifactStore
     from mlplatform.storage.base import Storage
     from mlplatform.tracking.base import ExperimentTracker
 
@@ -22,7 +21,6 @@ class ExecutionContext:
     """
 
     storage: Storage
-    artifact_store: ArtifactStore
     experiment_tracker: Optional[ExperimentTracker]
     feature_name: str
     model_name: str
@@ -35,22 +33,35 @@ class ExecutionContext:
     def artifact_base_path(self) -> str:
         return f"{self.feature_name}/{self.model_name}/{self.version}"
 
+    def _resolve_artifact_path(
+        self,
+        name: str,
+        *,
+        model_name: str | None = None,
+        version: str | None = None,
+    ) -> str:
+        """Build the storage path for an artifact using path conventions."""
+        m = model_name or self.model_name
+        v = version or self.version
+        return f"{self.feature_name}/{m}/{v}/{name}"
+
     def save_artifact(self, name: str, obj: Any) -> None:
         """Save an artifact under the current model's versioned path."""
         self.storage.save(f"{self.artifact_base_path}/{name}", obj)
 
-    def load_artifact(self, name: str) -> Any:
-        """Load an artifact from the current model's versioned path."""
-        return self.storage.load(f"{self.artifact_base_path}/{name}")
+    def load_artifact(
+        self,
+        name: str,
+        *,
+        model_name: str | None = None,
+        version: str | None = None,
+    ) -> Any:
+        """Load an artifact. Defaults to current model/version.
 
-    def load_artifact_from(self, model_name: str, version: str, name: str) -> Any:
-        """Load artifact from a different model/version (e.g., for ensemble)."""
-        if version == "latest":
-            meta = self.artifact_store.resolve_model(model_name, "latest")
-            path = meta["path"]
-        else:
-            path = f"{self.feature_name}/{model_name}/{version}"
-        return self.storage.load(f"{path}/{name}")
+        Override model_name/version for cross-model loading (e.g., ensembles).
+        """
+        path = self._resolve_artifact_path(name, model_name=model_name, version=version)
+        return self.storage.load(path)
 
     def log_params(self, params: dict[str, Any]) -> None:
         if self.experiment_tracker:
@@ -59,12 +70,3 @@ class ExecutionContext:
     def log_metrics(self, metrics: dict[str, float]) -> None:
         if self.experiment_tracker:
             self.experiment_tracker.log_metrics(metrics)
-
-    def register_model(self, metadata: dict[str, Any] | None = None) -> None:
-        """Register current model version in the artifact store."""
-        self.artifact_store.register_model(self.model_name, {
-            "version": self.version,
-            "feature_name": self.feature_name,
-            "path": self.artifact_base_path,
-            **(metadata or {}),
-        })

@@ -68,7 +68,6 @@ class MyTrainer(BaseTrainer):
 
         ctx.save_artifact(cons.MODEL_ARTIFACT, model)
         ctx.save_artifact(cons.SCALER_ARTIFACT, scaler)
-        ctx.register_model({"accuracy": float(accuracy)})
 
 
 if __name__ == "__main__":

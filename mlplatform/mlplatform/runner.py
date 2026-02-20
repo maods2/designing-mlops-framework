@@ -1,4 +1,4 @@
-"""Flat workflow orchestrator replacing the local/, profiles/, runners/ hierarchy."""
+"""Workflow orchestrator with profile-driven infrastructure resolution."""
 
 from __future__ import annotations
 
@@ -8,15 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from mlplatform.artifacts.local import LocalArtifactStore
 from mlplatform.config.loader import load_workflow_config
 from mlplatform.config.schema import ModelConfig, WorkflowConfig
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
 from mlplatform.core.trainer import BaseTrainer
+from mlplatform.invocation.base import InvocationStrategy
 from mlplatform.log import get_logger
-from mlplatform.storage.local import LocalFileSystem
-from mlplatform.tracking.local import LocalJsonTracker
+from mlplatform.profiles.registry import Profile, get_profile
 
 
 def dev_context(
@@ -55,8 +54,10 @@ def run_workflow(
     """
     workflow = load_workflow_config(dag_path)
     version = version or _generate_version()
+    prof = get_profile(profile)
     log = get_logger("mlplatform.runner", workflow.log_level)
-    log.info("Running workflow '%s' (%s) version=%s", workflow.workflow_name, workflow.pipeline_type, version)
+    log.info("Running workflow '%s' (%s) profile=%s version=%s",
+             workflow.workflow_name, workflow.pipeline_type, profile, version)
 
     results: dict[str, str] = {}
     for model_cfg in workflow.models:
@@ -65,7 +66,8 @@ def run_workflow(
             if workflow.pipeline_type == "training":
                 _run_training(model_cfg, ctx)
             else:
-                _run_prediction(model_cfg, ctx)
+                invocation = prof.invocation_strategy_factory()
+                _run_prediction(model_cfg, ctx, invocation)
             results[model_cfg.model_name] = "ok"
         except Exception as exc:
             ctx.log.error("Model '%s' failed: %s", model_cfg.model_name, exc)
@@ -86,11 +88,13 @@ def _build_context(
     version: str,
     base_path: str | None,
 ) -> ExecutionContext:
-    storage, artifact_store, tracker = _create_infra(profile, base_path)
+    prof = get_profile(profile)
+    base = base_path or "./artifacts"
+    storage = prof.storage_factory(base)
+    tracker = prof.tracker_factory(base)
     log = get_logger(f"mlplatform.{model_cfg.model_name}", workflow.log_level)
     return ExecutionContext(
         storage=storage,
-        artifact_store=artifact_store,
         experiment_tracker=tracker,
         feature_name=workflow.feature_name,
         model_name=model_cfg.model_name,
@@ -99,13 +103,6 @@ def _build_context(
         log=log,
         _pipeline_type=workflow.pipeline_type,
     )
-
-
-def _create_infra(profile: str, base_path: str | None):
-    base = base_path or "./artifacts"
-    if profile in ("local", "local-spark", "cloud-batch-emulated"):
-        return (LocalFileSystem(base), LocalArtifactStore(base), LocalJsonTracker(base))
-    return (LocalFileSystem(base), LocalArtifactStore(base), LocalJsonTracker(base))
 
 
 def _resolve_class(module_path: str, base_class: type) -> type:
@@ -127,10 +124,12 @@ def _run_training(model_cfg: ModelConfig, ctx: ExecutionContext) -> None:
     ctx.log.info("Training complete: %s", model_cfg.model_name)
 
 
-def _run_prediction(model_cfg: ModelConfig, ctx: ExecutionContext) -> None:
+def _run_prediction(
+    model_cfg: ModelConfig,
+    ctx: ExecutionContext,
+    invocation: InvocationStrategy,
+) -> Any:
     predictor_cls = _resolve_class(model_cfg.module, BasePredictor)
     predictor = predictor_cls()
     predictor.context = ctx
-    ctx.log.info("Loading model for prediction: %s", model_cfg.model_name)
-    predictor.load_model()
-    ctx.log.info("Model loaded: %s", model_cfg.model_name)
+    return invocation.invoke(predictor, ctx)

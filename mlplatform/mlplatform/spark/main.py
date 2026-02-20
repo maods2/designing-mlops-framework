@@ -14,7 +14,7 @@ import importlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 
@@ -56,7 +56,6 @@ def _load_config(config_path: str) -> dict[str, Any]:
 
 def _build_context_from_config(config: dict[str, Any]):
     """Build an ExecutionContext from the serialized run config JSON."""
-    from mlplatform.artifacts.local import LocalArtifactStore
     from mlplatform.core.context import ExecutionContext
     from mlplatform.log import get_logger
     from mlplatform.storage.local import LocalFileSystem
@@ -68,7 +67,6 @@ def _build_context_from_config(config: dict[str, Any]):
 
     return ExecutionContext(
         storage=LocalFileSystem(base_path=base_path),
-        artifact_store=LocalArtifactStore(base_path=base_path),
         experiment_tracker=LocalJsonTracker(base_path=base_path),
         feature_name=runtime.get("feature_name", "default"),
         model_name=runtime.get("model_name", "default"),
@@ -110,61 +108,33 @@ def _run_spark_training(config_path: str, packages: str | None = None) -> None:
     ctx.log.info("Spark training completed")
 
 
-def _make_map_in_pandas_fn(config: dict[str, Any]) -> Any:
-    """Build mapInPandas function that loads model per partition and runs predict_chunk."""
-
-    def predict_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
-        from mlplatform.core.predictor import BasePredictor
-
-        ctx = _build_context_from_config(config)
-        predictor_cls = _resolve_class_from_config(config, BasePredictor)
-        predictor = predictor_cls()
-        predictor.context = ctx
-        predictor.load_model()
-
-        for batch in iterator:
-            result = predictor.predict_chunk(batch)
-            if not isinstance(result, pd.DataFrame):
-                result = pd.DataFrame({"prediction": result})
-            yield result
-
-    return predict_partition
-
-
 def _run_spark_inference(
     config_path: str,
     input_path: str | None = None,
     output_path: str | None = None,
     packages: str | None = None,
 ) -> None:
-    """Run distributed inference via Spark mapInPandas."""
-    from pyspark.sql import SparkSession
-
+    """Run distributed inference via SparkBatchInvocation."""
     if packages:
         _add_packages_to_path(packages)
 
-    config = _load_config(config_path)
-    spark = SparkSession.builder.appName("MLPlatform-Spark-Inference").getOrCreate()
-
-    if input_path:
-        if input_path.lower().endswith(".parquet"):
-            sdf = spark.read.parquet(input_path)
-        else:
-            sdf = spark.read.option("header", "true").csv(input_path)
-    else:
+    if not input_path:
         raise ValueError("--input-path required for inference")
 
-    predict_fn = _make_map_in_pandas_fn(config)
+    config = _load_config(config_path)
+    from mlplatform.core.predictor import BasePredictor
+    from mlplatform.invocation.spark_batch import SparkBatchInvocation
 
-    from pyspark.sql.types import DoubleType, StructField, StructType
-    result_schema = StructType(list(sdf.schema.fields) + [StructField("prediction", DoubleType())])
-    result = sdf.mapInPandas(predict_fn, schema=result_schema)
+    ctx = _build_context_from_config(config)
+    predictor_cls = _resolve_class_from_config(config, BasePredictor)
+    predictor = predictor_cls()
+    predictor.context = ctx
 
-    if output_path:
-        result.write.mode("overwrite").parquet(output_path)
-        print(f"Wrote predictions to {output_path}")
-    else:
-        result.show()
+    invocation = SparkBatchInvocation(
+        input_path=input_path,
+        output_path=output_path,
+    )
+    invocation.invoke(predictor, ctx)
 
 
 def main() -> int:

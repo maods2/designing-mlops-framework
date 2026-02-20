@@ -25,6 +25,7 @@ def dev_context(
     profile: str = "local",
     version: str = "dev",
     base_path: str | None = None,
+    commit_hash: str | None = None,
 ) -> ExecutionContext:
     """Build an ExecutionContext for local development and debugging.
 
@@ -40,7 +41,45 @@ def dev_context(
     """
     workflow = load_workflow_config(dag_path)
     model_cfg = workflow.models[model_index]
-    return _build_context(workflow, model_cfg, profile, version, base_path)
+    return _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
+
+
+def dev_predict(
+    dag_path: str | Path,
+    data: Any = None,
+    model_index: int = 0,
+    profile: str = "local",
+    version: str = "dev",
+    base_path: str | None = None,
+) -> Any:
+    """Run prediction locally for development and debugging.
+
+    When *data* is provided (a DataFrame), the framework I/O is skipped and
+    ``predict_chunk`` is called directly.  When *data* is ``None``, the
+    profile's ``InvocationStrategy`` handles data loading from the
+    YAML-configured source.
+
+    Switch between in-process and PySpark by passing *profile*:
+    ``"local"`` (in-process) or ``"local-spark"`` (PySpark mapInPandas).
+    """
+    workflow = load_workflow_config(dag_path)
+    model_cfg = workflow.models[model_index]
+    ctx = _build_context(workflow, model_cfg, profile, version, base_path)
+
+    predictor_cls = _resolve_class(model_cfg.module, BasePredictor)
+    predictor = predictor_cls()
+    predictor.context = ctx
+    predictor.load_model()
+    ctx.log.info("Model loaded: %s", model_cfg.model_name)
+
+    if data is not None:
+        result = predictor.predict_chunk(data)
+        ctx.log.info("Dev prediction complete (manual data): %d rows", len(result))
+        return result
+
+    prof = get_profile(profile)
+    invocation = prof.invocation_strategy_factory()
+    return invocation.invoke(predictor, ctx, model_cfg)
 
 
 def run_workflow(
@@ -48,6 +87,7 @@ def run_workflow(
     profile: str = "local",
     version: str | None = None,
     base_path: str | None = None,
+    commit_hash: str | None = None,
 ) -> dict[str, str]:
     """Run all models defined in a DAG workflow config.
 
@@ -62,7 +102,8 @@ def run_workflow(
 
     results: dict[str, str] = {}
     for model_cfg in workflow.models:
-        ctx = _build_context(workflow, model_cfg, profile, version, base_path)
+        ctx = _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
+        _log_framework_params(ctx, profile)
         try:
             if workflow.pipeline_type == "training":
                 _run_training(model_cfg, ctx)
@@ -88,6 +129,7 @@ def _build_context(
     profile: str,
     version: str,
     base_path: str | None,
+    commit_hash: str | None = None,
 ) -> ExecutionContext:
     prof = get_profile(profile)
     base = base_path or "./artifacts"
@@ -109,7 +151,20 @@ def _build_context(
         optional_configs=model_cfg.optional_configs,
         log=log,
         _pipeline_type=workflow.pipeline_type,
+        commit_hash=commit_hash,
     )
+
+
+def _log_framework_params(ctx: ExecutionContext, profile: str) -> None:
+    """Log framework-level parameters for reproducibility tracking."""
+    params: dict[str, Any] = {
+        "mlplatform.profile": profile,
+        "mlplatform.version": ctx.version,
+        "mlplatform.pipeline_type": ctx._pipeline_type,
+    }
+    if ctx.commit_hash:
+        params["mlplatform.commit_hash"] = ctx.commit_hash
+    ctx.log_params(params)
 
 
 def _resolve_class(module_path: str, base_class: type) -> type:

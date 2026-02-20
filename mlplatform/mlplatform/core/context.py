@@ -30,6 +30,7 @@ class ExecutionContext:
     optional_configs: dict[str, Any] = field(default_factory=dict)
     log: logging.Logger = field(default_factory=lambda: logging.getLogger("mlplatform"))
     _pipeline_type: str = ""
+    commit_hash: str | None = None
 
     @property
     def storage(self) -> Storage:

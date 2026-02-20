@@ -88,6 +88,7 @@ def _build_context_from_config(config: dict[str, Any]):
         optional_configs=runtime.get("optional_configs", {}),
         log=get_logger(f"mlplatform.spark.{model}"),
         _pipeline_type=runtime.get("pipeline_type", ""),
+        commit_hash=runtime.get("commit_hash"),
     )
 
 
@@ -125,11 +126,25 @@ def _resolve_class_from_config(config: dict[str, Any], base_class: type) -> type
     raise ImportError(f"No {base_class.__name__} subclass found in {module_path}")
 
 
+def _log_framework_params(ctx: Any, config: dict[str, Any]) -> None:
+    """Log framework-level parameters for reproducibility tracking."""
+    env_meta = config.get("environment_metadata", {})
+    params: dict[str, Any] = {
+        "mlplatform.profile": env_meta.get("profile", "unknown"),
+        "mlplatform.version": ctx.version,
+        "mlplatform.pipeline_type": ctx._pipeline_type,
+    }
+    if ctx.commit_hash:
+        params["mlplatform.commit_hash"] = ctx.commit_hash
+    ctx.log_params(params)
+
+
 def _run_spark_training(config: dict[str, Any]) -> None:
     """Run training on the Spark driver (in-process)."""
     from mlplatform.core.trainer import BaseTrainer
 
     ctx = _build_context_from_config(config)
+    _log_framework_params(ctx, config)
     trainer_cls = _resolve_class_from_config(config, BaseTrainer)
     trainer = trainer_cls()
     trainer.context = ctx
@@ -144,6 +159,7 @@ def _run_spark_inference(config: dict[str, Any]) -> None:
     from mlplatform.invocation.spark_batch import SparkBatchInvocation
 
     ctx = _build_context_from_config(config)
+    _log_framework_params(ctx, config)
     model_cfg = _build_model_cfg_from_config(config)
     predictor_cls = _resolve_class_from_config(config, BasePredictor)
     predictor = predictor_cls()

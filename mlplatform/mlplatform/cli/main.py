@@ -16,6 +16,7 @@ def main() -> None:
     )
     run_parser.add_argument("--version", help="Model version (default: auto-generated)")
     run_parser.add_argument("--base-path", help="Artifact storage base path (default: ./artifacts)")
+    run_parser.add_argument("--commit-hash", help="Git commit hash to track the code version used for this run")
 
     build_parser = subparsers.add_parser("build-package", help="Build root.zip for Spark/Dataproc deployment")
     build_parser.add_argument("--model-package", default="example_model", help="Model package name")
@@ -33,6 +34,7 @@ def main() -> None:
             profile=args.profile,
             version=args.version,
             base_path=args.base_path,
+            commit_hash=args.commit_hash,
         )
         for model_name, result in results.items():
             print(f"{model_name}: {result}")

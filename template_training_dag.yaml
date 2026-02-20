@@ -6,21 +6,22 @@ config_version: 2
 models:
   - model_name: lr_p708  # Unique identifier for this model
     # Compute size: xs (4 cores, 15GB), s (8 cores, 32GB), m (16 cores, 64GB), l (60 cores, 240GB)
-    compute: s 
+    compute: s
     training_platform: VertexAI # Options: Dataproc, VertexAI
-    # Optional: Path to custom training script (relative to source code bucket)
-    # Leave empty to use default training pipeline
     module: "example_model.train"
-    # Optional configurations for training
     optional_configs:
-      # Test/train split ratio (between 0 and 1). Default: 0.2
       test_size: 0.2
-      # Model hyperparameters (customize based on your model type)
+      # Local file fallback (used when bq_params is absent)
+      train_data_path: "example_model/data/sample_train.csv"
       hyperparameters:
-        n_estimators: 100
-        max_depth: 10
-        min_samples_split: 2
-        min_samples_leaf: 1
-        min_samples_leaf: 1
-      # Optional: Add any additional training configurations here
-      # custom_param: value
+        max_iter: 1000
+      # BigQuery parameters -- injected into sql/load_training_data.sql.
+      # Uncomment below to load training data from BigQuery instead of CSV.
+      # bq_params:
+      #   project: my-gcp-project
+      #   dataset: my_dataset
+      #   table: training_features
+      #   start_date: "2025-01-01"
+      #   end_date: "2025-12-31"
+      #   sample_fraction: 1.0
+      #   target_column: target

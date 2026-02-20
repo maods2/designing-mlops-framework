@@ -8,11 +8,24 @@ models:
     serving_platform: VertexAI
     module: "example_model.predict"
     model_version: "latest"
+
+    # File-based I/O (used by InProcess and SparkBatch invocations)
     input_path: "example_model/data/sample_inference.csv"
     output_path: "artifacts/predictions.csv"
-    prediction_dataset_name: dataset_name
-    prediction_table_name: table_name
-    prediction_output_dataset_table: dataset.output_table
-    unique_identifier_column: id
+
+    # BigQuery I/O (used when file paths are absent or by SparkBatch)
+    prediction_dataset_name: my_dataset
+    prediction_table_name: scoring_features
+    prediction_output_dataset_table: my_dataset.predictions_output
+
+    unique_identifier_column: vin
     optional_configs:
       prediction_threshold: 0.5
+      # BigQuery parameters -- injected into sql/load_prediction_data.sql.
+      # Used when data scientists need a custom query instead of SELECT *.
+      # bq_params:
+      #   project: my-gcp-project
+      #   dataset: my_dataset
+      #   table: scoring_features
+      #   scoring_date: "2025-06-01"
+      #   unique_id_column: vin

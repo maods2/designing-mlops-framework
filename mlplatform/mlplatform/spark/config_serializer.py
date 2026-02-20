@@ -15,6 +15,7 @@ def workflow_config_to_dict(
     base_path: str = "./artifacts",
     version: str = "dev",
     profile: str = "local",
+    commit_hash: str | None = None,
 ) -> dict[str, Any]:
     """Serialize workflow + model config to JSON-serializable dict for cloud main.py."""
     return {
@@ -34,6 +35,7 @@ def workflow_config_to_dict(
             "prediction_dataset_name": model.prediction_dataset_name,
             "prediction_table_name": model.prediction_table_name,
             "prediction_output_dataset_table": model.prediction_output_dataset_table,
+            "commit_hash": commit_hash,
         },
         "environment_metadata": {
             "base_path": base_path,
@@ -52,6 +54,7 @@ def write_workflow_config(
     base_path: str = "./artifacts",
     version: str = "dev",
     profile: str = "local",
+    commit_hash: str | None = None,
 ) -> Path:
     """Write workflow config to JSON file for cloud submission."""
     path = Path(path)
@@ -59,7 +62,8 @@ def write_workflow_config(
     with open(path, "w") as f:
         json.dump(
             workflow_config_to_dict(
-                workflow, model, base_path=base_path, version=version, profile=profile
+                workflow, model, base_path=base_path, version=version,
+                profile=profile, commit_hash=commit_hash,
             ),
             f,
             indent=2,

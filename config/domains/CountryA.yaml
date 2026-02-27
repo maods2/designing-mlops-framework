@@ -1,0 +1,5 @@
+required:
+  - data.raw_dataset
+
+data:
+  raw_dataset: countryA_training

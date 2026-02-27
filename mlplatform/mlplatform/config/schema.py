@@ -1,4 +1,4 @@
-"""Configuration schema for DAG template format."""
+"""Configuration schema for DAG template and composed config formats."""
 
 from __future__ import annotations
 
@@ -8,10 +8,7 @@ from typing import Any
 
 @dataclass
 class ModelConfig:
-    """Configuration for a single model within a workflow.
-
-    Unified schema supporting both training and prediction DAG entries.
-    """
+    """Configuration for a single model/job within a workflow."""
 
     model_name: str
     module: str
@@ -29,6 +26,11 @@ class ModelConfig:
     unique_identifier_column: str | None = None
     input_path: str | None = None
     output_path: str | None = None
+
+    # New fields for job-centric orchestration/runtime contracts
+    depends_on: list[str] = field(default_factory=list)
+    cloud: dict[str, Any] = field(default_factory=dict)
+    image: str | None = None
 
 
 @dataclass

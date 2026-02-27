@@ -3,34 +3,38 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-import yaml
-
+from mlplatform.config.composer import compose_workflow_dict
 from mlplatform.config.schema import ModelConfig, WorkflowConfig
 
 
-def _load_yaml(path: str | Path) -> dict[str, Any]:
-    with open(path) as f:
-        return yaml.safe_load(f) or {}
-
-
-def load_workflow_config(dag_path: str | Path) -> WorkflowConfig:
-    """Load a workflow from the DAG template format."""
+def load_workflow_config(
+    dag_path: str | Path,
+    config_profile: str | None = None,
+    domain: str | None = None,
+    runtime_overrides: dict | None = None,
+) -> WorkflowConfig:
+    """Load a workflow from DAG template format with optional composition overlays."""
     dag_path = Path(dag_path)
     if not dag_path.exists():
         raise FileNotFoundError(f"DAG config not found: {dag_path}")
 
-    data = _load_yaml(dag_path)
+    data = compose_workflow_dict(
+        dag_path=dag_path,
+        config_profile=config_profile,
+        domain=domain,
+        runtime_overrides=runtime_overrides,
+    )
     pipeline_type = data.get("pipeline_type", "training")
 
     models: list[ModelConfig] = []
     for entry in data.get("models", []):
-        platform = entry.get("training_platform") or entry.get("serving_platform") or "VertexAI"
+        platform = entry.get("training_platform") or entry.get("serving_platform") or entry.get("platform") or "VertexAI"
+        cloud_cfg = entry.get("cloud") or {}
         models.append(ModelConfig(
             model_name=entry["model_name"],
-            module=entry.get("module", ""),
-            compute=entry.get("compute", "s"),
+            module=entry.get("module") or entry.get("entrypoint", ""),
+            compute=entry.get("compute") or (cloud_cfg.get("compute", {}) or {}).get("class", "s"),
             platform=platform,
             optional_configs=entry.get("optional_configs") or {},
             prediction_dataset_name=entry.get("prediction_dataset_name"),
@@ -44,6 +48,9 @@ def load_workflow_config(dag_path: str | Path) -> WorkflowConfig:
             unique_identifier_column=entry.get("unique_identifier_column"),
             input_path=entry.get("input_path"),
             output_path=entry.get("output_path"),
+            depends_on=entry.get("depends_on") or [],
+            cloud=cloud_cfg,
+            image=entry.get("image") or cloud_cfg.get("image"),
         ))
 
     return WorkflowConfig(

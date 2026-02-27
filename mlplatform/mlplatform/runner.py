@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from mlplatform.config.dag import topological_order
 from mlplatform.config.loader import load_workflow_config
 from mlplatform.config.schema import ModelConfig, WorkflowConfig
 from mlplatform.core.artifact_registry import ArtifactRegistry
@@ -16,7 +17,7 @@ from mlplatform.core.predictor import BasePredictor
 from mlplatform.core.trainer import BaseTrainer
 from mlplatform.invocation.base import InvocationStrategy
 from mlplatform.log import get_logger
-from mlplatform.profiles.registry import Profile, get_profile
+from mlplatform.profiles.registry import get_profile
 
 
 def dev_context(
@@ -26,20 +27,11 @@ def dev_context(
     version: str = "dev",
     base_path: str | None = None,
     commit_hash: str | None = None,
+    config_profile: str | None = None,
+    domain: str | None = None,
 ) -> ExecutionContext:
-    """Build an ExecutionContext for local development and debugging.
-
-    Call this from a trainer/predictor's ``if __name__ == "__main__"`` block
-    so you can run/debug the file directly::
-
-        if __name__ == "__main__":
-            from mlplatform.runner import dev_context
-            ctx = dev_context("template_training_dag.yaml")
-            trainer = MyTrainer()
-            trainer.context = ctx
-            trainer.train()
-    """
-    workflow = load_workflow_config(dag_path)
+    """Build an ExecutionContext for local development and debugging."""
+    workflow = load_workflow_config(dag_path, config_profile=config_profile, domain=domain)
     model_cfg = workflow.models[model_index]
     return _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
 
@@ -51,18 +43,11 @@ def dev_predict(
     profile: str = "local",
     version: str = "dev",
     base_path: str | None = None,
+    config_profile: str | None = None,
+    domain: str | None = None,
 ) -> Any:
-    """Run prediction locally for development and debugging.
-
-    When *data* is provided (a DataFrame), the framework I/O is skipped and
-    ``predict_chunk`` is called directly.  When *data* is ``None``, the
-    profile's ``InvocationStrategy`` handles data loading from the
-    YAML-configured source.
-
-    Switch between in-process and PySpark by passing *profile*:
-    ``"local"`` (in-process) or ``"local-spark"`` (PySpark mapInPandas).
-    """
-    workflow = load_workflow_config(dag_path)
+    """Run prediction locally for development and debugging."""
+    workflow = load_workflow_config(dag_path, config_profile=config_profile, domain=domain)
     model_cfg = workflow.models[model_index]
     ctx = _build_context(workflow, model_cfg, profile, version, base_path)
 
@@ -88,22 +73,25 @@ def run_workflow(
     version: str | None = None,
     base_path: str | None = None,
     commit_hash: str | None = None,
+    config_profile: str | None = None,
+    domain: str | None = None,
 ) -> dict[str, str]:
-    """Run all models defined in a DAG workflow config.
-
-    Returns a dict mapping model_name -> result status.
-    """
-    workflow = load_workflow_config(dag_path)
+    """Run all models/jobs defined in a DAG workflow config."""
+    workflow = load_workflow_config(dag_path, config_profile=config_profile, domain=domain)
     version = version or _generate_version()
     prof = get_profile(profile)
     log = get_logger("mlplatform.runner", workflow.log_level)
     log.info("Running workflow '%s' (%s) profile=%s version=%s",
              workflow.workflow_name, workflow.pipeline_type, profile, version)
 
+    ordered_models = topological_order(workflow.models)
+
     results: dict[str, str] = {}
-    for model_cfg in workflow.models:
+    for model_cfg in ordered_models:
         ctx = _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
         _log_framework_params(ctx, profile)
+        if model_cfg.image:
+            ctx.log_params({"mlplatform.image": model_cfg.image})
         try:
             if workflow.pipeline_type == "training":
                 _run_training(model_cfg, ctx)
@@ -116,6 +104,10 @@ def run_workflow(
             results[model_cfg.model_name] = f"error: {exc}"
     return results
 
+
+def _topological_order(models: list[ModelConfig]) -> list[ModelConfig]:
+    """Backward-compatible wrapper for DAG ordering."""
+    return topological_order(models)
 
 def _generate_version() -> str:
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")

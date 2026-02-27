@@ -1,0 +1,6 @@
+required:
+  - cloud.region
+
+cloud:
+  scheduling:
+    max_retries: 1

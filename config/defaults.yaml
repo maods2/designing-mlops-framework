@@ -1,0 +1,8 @@
+runtime_defaults:
+  compute_class: s
+  retries: 1
+  timeout_minutes: 120
+
+cloud:
+  platform: VertexAI
+  region: us-central1

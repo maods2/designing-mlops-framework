@@ -1,36 +1,27 @@
-# Prediction pipeline DAG - framework config + Databricks-like orchestration structure.
-# Framework values (required by mlplatform)
-workflow_name: example_workflow_prediction
-execution_mode: sequential
+pipeline_name: example_workflow_prediction
 pipeline_type: prediction
 feature_name: example
-config_version: 2
-log_level: INFO
 
-resources:
-  jobs:
-    schedule:
-      dev: "0 0 6 ? * MON"
-      qa: "0 0 6 ? * MON"
-      prod: "0 0 6 ? * MON"
 
-    environments:
-      dev: true
-      qa: true
-      prod: false
+schedule:
+  dev: ""
+  qa: "0 0 6 ? * MON"
+  prod: "0 0 6 ? * MON"
 
-    tasks:
-      - task_key: "run_prediction"
-        environment_key: default
-        model_name: example_model
-        serving_platform: VertexAI
-        module: "example_model.predict"
-        model_version: "latest"
+environments:
+  dev: true
+  qa: true
+  prod: false
 
-        config:
-          - global
-          - predict-dev
+tasks:
+  - task_id: predict
+    task_type: prediction
+    config:
+      - global
+      - predict-dev
+    model_name: example_model
+    compute: s
+    platform: Dataproc
+    module: "example_model.predict"
 
-        # File-based I/O (used by InProcess and SparkBatch invocations)
-        input_path: "example_model/data/sample_inference.csv"
-        output_path: "artifacts/predictions.csv"
+

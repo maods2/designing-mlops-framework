@@ -1,0 +1,18 @@
+# Local config profile - overrides for local development and testing.
+log_level: DEBUG
+base_path: ./local_artifacts
+profile: local
+
+optional_configs:
+  train_data_path: "example_model/data/sample_train.csv"
+  test_size: 0.2
+  hyperparameters:
+    max_iter: 1000
+  bq_params:
+    project: my-gcp-project
+    dataset: my_dataset
+    table: training_features
+    start_date: "2025-01-01"
+    end_date: "2025-12-31"
+    sample_fraction: 1.0
+    target_column: target

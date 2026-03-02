@@ -9,7 +9,11 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run", help="Run workflow locally")
-    run_parser.add_argument("--dag", required=True, help="Path to DAG YAML config")
+    run_parser.add_argument("--dag", required=True, help="Path to pipeline YAML config")
+    run_parser.add_argument(
+        "--task",
+        help="Task ID to run (e.g. train_model, predict). If omitted, runs all executable tasks.",
+    )
     run_parser.add_argument(
         "--profile", default="local",
         help="Profile name (local, local-spark, cloud-train, cloud-online, cloud-batch, cloud-batch-emulated)",
@@ -20,7 +24,7 @@ def main() -> None:
     run_parser.add_argument(
         "--config",
         help="Comma-separated config profile names to load and merge (e.g. global,local). "
-             "Overrides the 'config:' key declared in the DAG YAML.",
+             "Overrides the 'config:' key declared in the pipeline YAML.",
     )
 
     build_parser = subparsers.add_parser("build-package", help="Build root.zip for Spark/Dataproc deployment")
@@ -39,6 +43,7 @@ def main() -> None:
             config_names = [c.strip() for c in args.config.split(",") if c.strip()]
         results = run_workflow(
             dag_path=dag_path,
+            task_id=args.task,
             profile=args.profile,
             version=args.version,
             base_path=args.base_path,

@@ -71,9 +71,13 @@ class MyTrainer(BaseTrainer):
 
 
 if __name__ == "__main__":
-    from mlplatform.runner import dev_context
+    from mlplatform.runner import dev_train_context
 
-    ctx = dev_context("example_model/pipeline/train.yaml")
+    ctx = dev_train_context(
+        "example_model/pipeline/train.yaml",
+        task_id="train_model",
+        config_names=["global", "train-local"],
+    )
     trainer = MyTrainer()
     trainer.context = ctx
     trainer.train()

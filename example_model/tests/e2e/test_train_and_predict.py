@@ -5,25 +5,27 @@ from __future__ import annotations
 import pytest
 import pandas as pd
 
-from mlplatform.config.loader import load_workflow_config
+from mlplatform.config.factory import ConfigLoaderFactory
 from mlplatform.runner import _build_context
 
 
 class TestTrainAndPredict:
     def test_full_train_then_predict_cycle(
         self,
-        legacy_train_dag_path,
-        legacy_predict_dag_path,
+        train_dag_path,
+        predict_dag_path,
         sample_train_data,
         sample_inference_df,
         artifacts_dir,
     ):
-        """Train then predict end-to-end with example_model (legacy DAG format)."""
+        """Train then predict end-to-end with example_model (new pipeline schema)."""
         # --- Training ---
-        train_wf = load_workflow_config(legacy_train_dag_path)
-        train_model = train_wf.models[0]
+        train_pipeline = ConfigLoaderFactory.load_pipeline_config(
+            train_dag_path, task_id="train_model", config_names=["global", "train-local"]
+        )
+        train_task = train_pipeline.tasks[0]
         train_ctx = _build_context(
-            train_wf, train_model, "local", "e2e_v1", str(artifacts_dir)
+            train_pipeline, train_task, "local", "e2e_v1", str(artifacts_dir)
         )
         train_ctx.optional_configs["train_data"] = sample_train_data
 
@@ -35,8 +37,8 @@ class TestTrainAndPredict:
         # Verify artifacts
         model_path = (
             artifacts_dir
-            / train_wf.feature_name
-            / train_model.model_name
+            / train_pipeline.feature_name
+            / train_task.model_name
             / "e2e_v1"
             / "model.pkl"
         )
@@ -45,10 +47,12 @@ class TestTrainAndPredict:
         assert scaler_path.exists(), f"scaler.pkl not found: {scaler_path}"
 
         # --- Prediction ---
-        pred_wf = load_workflow_config(legacy_predict_dag_path)
-        pred_model = pred_wf.models[0]
+        pred_pipeline = ConfigLoaderFactory.load_pipeline_config(
+            predict_dag_path, task_id="predict", config_names=["global", "predict-local"]
+        )
+        pred_task = pred_pipeline.tasks[0]
         pred_ctx = _build_context(
-            pred_wf, pred_model, "local", "e2e_v1", str(artifacts_dir)
+            pred_pipeline, pred_task, "local", "e2e_v1", str(artifacts_dir)
         )
 
         from example_model.predict import MyPredictor
@@ -62,7 +66,7 @@ class TestTrainAndPredict:
         assert len(result) == len(sample_inference_df)
         assert result["prediction"].notna().all()
 
-    def test_new_dag_format_end_to_end(
+    def test_new_pipeline_format_end_to_end(
         self,
         train_dag_path,
         predict_dag_path,
@@ -70,12 +74,14 @@ class TestTrainAndPredict:
         sample_inference_df,
         artifacts_dir,
     ):
-        """New DAG format (resources.jobs.deployment.tasks) works end-to-end."""
+        """New flat pipeline schema works end-to-end."""
         # Train
-        train_wf = load_workflow_config(train_dag_path)
-        train_model = train_wf.models[0]
+        train_pipeline = ConfigLoaderFactory.load_pipeline_config(
+            train_dag_path, config_names=["global", "train-local"]
+        )
+        train_task = next(t for t in train_pipeline.tasks if t.module)
         train_ctx = _build_context(
-            train_wf, train_model, "local", "e2e_new", str(artifacts_dir)
+            train_pipeline, train_task, "local", "e2e_new", str(artifacts_dir)
         )
         train_ctx.optional_configs["train_data"] = sample_train_data
 
@@ -87,18 +93,20 @@ class TestTrainAndPredict:
         # Verify model artifact
         model_path = (
             artifacts_dir
-            / train_wf.feature_name
-            / train_model.model_name
+            / train_pipeline.feature_name
+            / train_task.model_name
             / "e2e_new"
             / "model.pkl"
         )
         assert model_path.exists()
 
         # Predict
-        pred_wf = load_workflow_config(predict_dag_path)
-        pred_model = pred_wf.models[0]
+        pred_pipeline = ConfigLoaderFactory.load_pipeline_config(
+            predict_dag_path, config_names=["global", "predict-local"]
+        )
+        pred_task = pred_pipeline.tasks[0]
         pred_ctx = _build_context(
-            pred_wf, pred_model, "local", "e2e_new", str(artifacts_dir)
+            pred_pipeline, pred_task, "local", "e2e_new", str(artifacts_dir)
         )
 
         from example_model.predict import MyPredictor

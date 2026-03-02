@@ -15,8 +15,8 @@ VERSION="local_$(date +%Y%m%d_%H%M%S)"
 BASE_PATH="${REPO_ROOT}/artifacts_local_run"
 DIST_DIR="${REPO_ROOT}/dist_local_run"
 
-TRAIN_DAG="${REPO_ROOT}/template_training_dag.yaml"
-PREDICT_DAG="${REPO_ROOT}/template_prediction_dag.yaml"
+TRAIN_DAG="${REPO_ROOT}/example_model/pipeline/train.yaml"
+PREDICT_DAG="${REPO_ROOT}/example_model/pipeline/predict.yaml"
 
 cleanup() {
     echo ""
@@ -45,12 +45,13 @@ echo "    Loading DAG, generating synthetic data, running trainer..."
 python3 -c "
 import pandas as pd
 from sklearn.datasets import make_classification
-from mlplatform.config.loader import load_workflow_config
+from mlplatform.config.factory import ConfigLoaderFactory
 from mlplatform.runner import _build_context, _run_training
 
-workflow = load_workflow_config('${TRAIN_DAG}')
-model_cfg = workflow.models[0]
-ctx = _build_context(workflow, model_cfg, 'local', '${VERSION}', '${BASE_PATH}')
+pipeline = ConfigLoaderFactory.load_pipeline_config('${TRAIN_DAG}', task_id='train_model', config_names=['global', 'train-local'])
+task_cfg = pipeline.tasks[0]
+model_cfg = task_cfg.to_model_config()
+ctx = _build_context(pipeline, task_cfg, 'local', '${VERSION}', '${BASE_PATH}')
 
 X, y = make_classification(n_samples=100, n_features=5, random_state=42)
 ctx.optional_configs['train_data'] = {
@@ -73,12 +74,12 @@ echo "    Loading trained model, running predict_chunk on sample data..."
 python3 -c "
 import pandas as pd
 from sklearn.datasets import make_classification
-from mlplatform.config.loader import load_workflow_config
+from mlplatform.config.factory import ConfigLoaderFactory
 from mlplatform.runner import _build_context
 
-workflow = load_workflow_config('${PREDICT_DAG}')
-model_cfg = workflow.models[0]
-ctx = _build_context(workflow, model_cfg, 'local', '${VERSION}', '${BASE_PATH}')
+pipeline = ConfigLoaderFactory.load_pipeline_config('${PREDICT_DAG}', task_id='predict', config_names=['global', 'predict-local'])
+task_cfg = pipeline.tasks[0]
+ctx = _build_context(pipeline, task_cfg, 'local', '${VERSION}', '${BASE_PATH}')
 
 from example_model.predict import MyPredictor
 predictor = MyPredictor()
@@ -87,7 +88,7 @@ predictor.load_model()
 
 X_test, _ = make_classification(n_samples=5, n_features=5, random_state=99)
 test_df = pd.DataFrame(X_test, columns=['f0','f1','f2','f3','f4'])
-result = predictor.predict_chunk(test_df)
+result = predictor.predict(test_df)
 
 print('    Predictions:')
 print(result[['f0','prediction']].to_string(index=False))
@@ -107,12 +108,12 @@ mkdir -p "${DIST_DIR}"
 
 # 3a: Serialize prediction config JSON
 python3 -c "
-from mlplatform.config.loader import load_workflow_config
+from mlplatform.config.factory import ConfigLoaderFactory
 from mlplatform.spark.config_serializer import write_workflow_config
 
-workflow = load_workflow_config('${PREDICT_DAG}')
-model_cfg = workflow.models[0]
-write_workflow_config(workflow, model_cfg, '${DIST_DIR}/spark_config.json',
+pipeline = ConfigLoaderFactory.load_pipeline_config('${PREDICT_DAG}', task_id='predict', config_names=['global', 'predict-local'])
+task_cfg = pipeline.tasks[0]
+write_workflow_config(pipeline, task_cfg, '${DIST_DIR}/spark_config.json',
                       base_path='${BASE_PATH}', version='${VERSION}')
 print('    Config written to ${DIST_DIR}/spark_config.json')
 "

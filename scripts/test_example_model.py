@@ -13,12 +13,14 @@ sys.path.insert(0, str(monorepo_root / "mlplatform"))
 
 
 def test_run_training_workflow():
-    """Test running training via run_workflow with a DAG YAML."""
+    """Test running training via run_workflow with a pipeline YAML."""
     from mlplatform.runner import run_workflow, _build_context
-    from mlplatform.config.loader import load_workflow_config
+    from mlplatform.config.factory import ConfigLoaderFactory
 
-    dag_path = monorepo_root / "template_training_dag.yaml"
-    workflow = load_workflow_config(dag_path)
+    dag_path = monorepo_root / "example_model" / "pipeline" / "train.yaml"
+    pipeline = ConfigLoaderFactory.load_pipeline_config(
+        dag_path, task_id="train_model", config_names=["global", "train-local"]
+    )
 
     X, y = make_classification(n_samples=50, n_features=5, random_state=42)
     train_data = {
@@ -28,8 +30,8 @@ def test_run_training_workflow():
 
     artifacts_dir = monorepo_root / "test_artifacts"
 
-    model_cfg = workflow.models[0]
-    ctx = _build_context(workflow, model_cfg, "local", "test_v1", str(artifacts_dir))
+    task_cfg = pipeline.tasks[0]
+    ctx = _build_context(pipeline, task_cfg, "local", "test_v1", str(artifacts_dir))
     ctx.optional_configs["train_data"] = train_data
 
     from example_model.train import MyTrainer
@@ -37,22 +39,24 @@ def test_run_training_workflow():
     trainer.context = ctx
     trainer.train()
 
-    model_path = artifacts_dir / workflow.feature_name / model_cfg.model_name / "test_v1" / "model.pkl"
+    model_path = artifacts_dir / pipeline.feature_name / task_cfg.model_name / "test_v1" / "model.pkl"
     assert model_path.exists(), f"Model artifact not found at {model_path}"
     print("PASS test_run_training_workflow")
 
 
 def test_run_prediction():
     """Test running prediction after training."""
-    from mlplatform.config.loader import load_workflow_config
+    from mlplatform.config.factory import ConfigLoaderFactory
     from mlplatform.runner import _build_context
 
-    dag_path = monorepo_root / "template_prediction_dag.yaml"
-    workflow = load_workflow_config(dag_path)
-    model_cfg = workflow.models[0]
+    dag_path = monorepo_root / "example_model" / "pipeline" / "predict.yaml"
+    pipeline = ConfigLoaderFactory.load_pipeline_config(
+        dag_path, task_id="predict", config_names=["global", "predict-local"]
+    )
+    task_cfg = pipeline.tasks[0]
 
     artifacts_dir = monorepo_root / "test_artifacts"
-    ctx = _build_context(workflow, model_cfg, "local", "test_v1", str(artifacts_dir))
+    ctx = _build_context(pipeline, task_cfg, "local", "test_v1", str(artifacts_dir))
 
     from example_model.predict import MyPredictor
     predictor = MyPredictor()
@@ -84,38 +88,44 @@ def test_build_package():
 
 def test_config_serializer():
     """Test config serialization for Spark main.py consumption."""
-    from mlplatform.config.loader import load_workflow_config
+    from mlplatform.config.factory import ConfigLoaderFactory
     from mlplatform.spark.config_serializer import write_workflow_config
 
-    dag_path = monorepo_root / "template_training_dag.yaml"
-    workflow = load_workflow_config(dag_path)
-    model_cfg = workflow.models[0]
+    dag_path = monorepo_root / "example_model" / "pipeline" / "train.yaml"
+    pipeline = ConfigLoaderFactory.load_pipeline_config(
+        dag_path, task_id="train_model", config_names=["global", "train-local"]
+    )
+    task_cfg = pipeline.tasks[0]
 
     config_path = monorepo_root / "test_dist" / "run_config.json"
-    write_workflow_config(workflow, model_cfg, config_path, base_path=str(monorepo_root / "test_artifacts"), version="test_v1")
+    write_workflow_config(pipeline, task_cfg, config_path, base_path=str(monorepo_root / "test_artifacts"), version="test_v1")
     assert config_path.exists()
 
     import json
     with open(config_path) as f:
         data = json.load(f)
-    assert data["runtime_config"]["feature_name"] == "eds"
-    assert data["runtime_config"]["model_name"] == "lr_p708"
+    assert data["runtime_config"]["feature_name"] == "example"
+    assert data["runtime_config"]["model_name"] == "example_model"
     print("PASS test_config_serializer")
 
 
 def test_pyspark_batch_prediction():
     """Test PySpark local batch prediction via spark/main.py mapInPandas."""
     import json
-    from mlplatform.config.loader import load_workflow_config
+    from mlplatform.config.factory import ConfigLoaderFactory
     from mlplatform.spark.config_serializer import write_workflow_config
     from mlplatform.spark.main import _run_spark_inference
 
     artifacts_dir = monorepo_root / "test_artifacts"
 
-    dag_pred = load_workflow_config(monorepo_root / "template_prediction_dag.yaml")
-    pred_model = dag_pred.models[0]
+    pipeline = ConfigLoaderFactory.load_pipeline_config(
+        monorepo_root / "example_model" / "pipeline" / "predict.yaml",
+        task_id="predict",
+        config_names=["global", "predict-local"],
+    )
+    task_cfg = pipeline.tasks[0]
     config_path = monorepo_root / "test_dist" / "spark_pred_config.json"
-    write_workflow_config(dag_pred, pred_model, config_path, base_path=str(artifacts_dir), version="test_v1")
+    write_workflow_config(pipeline, task_cfg, config_path, base_path=str(artifacts_dir), version="test_v1")
 
     X_test, _ = make_classification(n_samples=10, n_features=5, random_state=99)
     csv_path = monorepo_root / "test_dist" / "spark_input.csv"

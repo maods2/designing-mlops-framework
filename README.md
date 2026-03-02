@@ -454,18 +454,22 @@ For distributed prediction using Spark's `mapInPandas`, the framework provides `
 ### Step 1: Train a model first
 
 ```bash
-mlplatform run --dag template_training_dag.yaml --version v1.0 --base-path ./artifacts
+mlplatform run --dag example_model/pipeline/train.yaml --task train_model --version v1.0 --base-path ./artifacts
 ```
 
 ### Step 2: Generate a config JSON for Spark
 
 ```python
-from mlplatform.config.loader import load_workflow_config
+from mlplatform.config import load_pipeline_config
 from mlplatform.spark.config_serializer import write_workflow_config
 
-workflow = load_workflow_config("template_prediction_dag.yaml")
-model_cfg = workflow.models[0]
-write_workflow_config(workflow, model_cfg, "dist/spark_config.json",
+pipeline = load_pipeline_config(
+    "example_model/pipeline/predict.yaml",
+    task_id="predict",
+    config_names=["global", "predict-local"],
+)
+task_cfg = pipeline.tasks[0]
+write_workflow_config(pipeline, task_cfg, "dist/spark_config.json",
                       base_path="./artifacts", version="v1.0")
 ```
 

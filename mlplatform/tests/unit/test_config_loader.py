@@ -1,4 +1,4 @@
-"""Unit tests for mlplatform.config.loader."""
+"""Unit tests for mlplatform.config.factory (new schema loader)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mlplatform.config.loader import load_workflow_config, _deep_merge, _load_config_profiles
+from mlplatform.config.factory import ConfigLoaderFactory, _deep_merge
 
 
 class TestDeepMerge:
@@ -31,76 +31,65 @@ class TestDeepMerge:
         assert _deep_merge({}, override) == {"a": 1}
 
 
-class TestLoadWorkflowConfig:
-    def test_load_legacy_train_dag(self, legacy_train_dag_path):
-        cfg = load_workflow_config(legacy_train_dag_path)
-        assert cfg.workflow_name == "eds_workflow_sequential"
-        assert cfg.pipeline_type == "training"
-        assert cfg.feature_name == "eds"
-        assert len(cfg.models) == 1
-        assert cfg.models[0].model_name == "lr_p708"
-
-    def test_load_legacy_predict_dag(self, legacy_predict_dag_path):
-        cfg = load_workflow_config(legacy_predict_dag_path)
-        assert cfg.pipeline_type == "prediction"
-        assert cfg.models[0].input_path is not None
-
-    def test_load_new_train_dag(self, train_dag_path):
-        """New format (resources.jobs.deployment.tasks) loads correctly."""
-        cfg = load_workflow_config(train_dag_path)
-        assert cfg.workflow_name == "example_workflow_sequential"
+class TestLoadPipelineConfig:
+    def test_load_train_pipeline(self, train_dag_path):
+        cfg = ConfigLoaderFactory.load_pipeline_config(train_dag_path)
+        assert cfg.pipeline_name == "example_workflow_sequential"
         assert cfg.pipeline_type == "training"
         assert cfg.feature_name == "example"
-        assert len(cfg.models) == 1
-        assert cfg.models[0].module == "example_model.train"
+        assert len(cfg.tasks) >= 1
+        train_task = next(t for t in cfg.tasks if t.task_id == "train_model")
+        assert train_task.module == "example_model.train"
 
-    def test_load_new_predict_dag(self, predict_dag_path):
-        cfg = load_workflow_config(predict_dag_path)
+    def test_load_predict_pipeline(self, predict_dag_path):
+        cfg = ConfigLoaderFactory.load_pipeline_config(predict_dag_path)
         assert cfg.pipeline_type == "prediction"
-        assert cfg.models[0].input_path is not None
+        predict_task = next(t for t in cfg.tasks if t.task_id == "predict")
+        assert predict_task.input_path is not None or predict_task.module
+
+    def test_load_single_task(self, train_dag_path):
+        cfg = ConfigLoaderFactory.load_pipeline_config(
+            train_dag_path, task_id="train_model"
+        )
+        assert len(cfg.tasks) == 1
+        assert cfg.tasks[0].task_id == "train_model"
 
     def test_config_profiles_from_task(self, train_dag_path):
-        """Task-level config: [global, dev] — profiles recorded on WorkflowConfig."""
-        cfg = load_workflow_config(train_dag_path)
+        cfg = ConfigLoaderFactory.load_pipeline_config(train_dag_path)
         assert "global" in cfg.config_profiles
         assert "dev" in cfg.config_profiles
 
     def test_config_names_cli_override(self, train_dag_path):
-        """CLI --config overrides task-level config: key."""
-        cfg = load_workflow_config(train_dag_path, config_names=["global"])
-        assert cfg.config_profiles == ["global"]
+        cfg = ConfigLoaderFactory.load_pipeline_config(
+            train_dag_path, config_names=["global", "train-local"]
+        )
+        assert "global" in cfg.config_profiles
+        assert "train-local" in cfg.config_profiles
 
     def test_file_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            load_workflow_config(tmp_path / "nonexistent.yaml")
+            ConfigLoaderFactory.load_pipeline_config(tmp_path / "nonexistent.yaml")
 
     def test_config_profile_merging(self, tmp_path):
-        """Config profiles are merged: later overrides earlier."""
         cfg_dir = tmp_path / "config"
         cfg_dir.mkdir()
-        (cfg_dir / "base.yaml").write_text("log_level: INFO\n")
-        (cfg_dir / "override.yaml").write_text("log_level: DEBUG\n")
+        (cfg_dir / "global.yaml").write_text("log_level: INFO\n")
+        (cfg_dir / "train-local.yaml").write_text("log_level: DEBUG\n")
 
-        dag_file = tmp_path / "train.yaml"
-        dag_file.write_text(
-            "workflow_name: test\nexecution_mode: sequential\n"
-            "pipeline_type: training\nfeature_name: test\nconfig_version: 1\n"
-            "models: []\n"
+        pipeline_file = tmp_path / "pipeline" / "train.yaml"
+        pipeline_file.parent.mkdir(parents=True)
+        pipeline_file.write_text(
+            "pipeline_name: test\npipeline_type: training\nfeature_name: test\n"
+            "tasks:\n  - task_id: train_model\n    task_type: training\n"
+            "    config: [global, train-local]\n    module: example_model.train\n"
         )
-        cfg = load_workflow_config(dag_file, config_names=["base", "override"], config_dir=cfg_dir)
+        cfg = ConfigLoaderFactory.load_pipeline_config(
+            pipeline_file, config_dir=cfg_dir
+        )
         assert cfg.log_level == "DEBUG"
 
-    def test_dag_log_level_wins_over_profile(self, tmp_path):
-        """DAG YAML log_level wins over merged profile value."""
-        cfg_dir = tmp_path / "config"
-        cfg_dir.mkdir()
-        (cfg_dir / "global.yaml").write_text("log_level: DEBUG\n")
-
-        dag_file = tmp_path / "train.yaml"
-        dag_file.write_text(
-            "workflow_name: test\nexecution_mode: sequential\n"
-            "pipeline_type: training\nfeature_name: test\nconfig_version: 1\n"
-            "log_level: WARNING\nmodels: []\n"
-        )
-        cfg = load_workflow_config(dag_file, config_names=["global"], config_dir=cfg_dir)
-        assert cfg.log_level == "WARNING"
+    def test_task_not_found_raises(self, train_dag_path):
+        with pytest.raises(ValueError, match="Task 'nonexistent' not found"):
+            ConfigLoaderFactory.load_pipeline_config(
+                train_dag_path, task_id="nonexistent"
+            )

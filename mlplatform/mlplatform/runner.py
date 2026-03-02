@@ -8,8 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from mlplatform.config.loader import load_workflow_config
-from mlplatform.config.schema import ModelConfig, WorkflowConfig
+from mlplatform.config.factory import ConfigLoaderFactory
+from mlplatform.config.schema import ModelConfig, TaskConfig, UnifiedPipelineConfig
 from mlplatform.core.artifact_registry import ArtifactRegistry
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
@@ -19,42 +19,43 @@ from mlplatform.log import get_logger
 from mlplatform.profiles.registry import Profile, get_profile
 
 
-def dev_context(
-    dag_path: str | Path,
-    model_index: int = 0,
+def dev_train_context(
+    pipeline_path: str | Path,
+    task_id: str = "train_model",
     profile: str = "local",
     version: str = "dev",
     base_path: str | None = None,
     commit_hash: str | None = None,
     config_names: list[str] | None = None,
 ) -> ExecutionContext:
-    """Build an ExecutionContext for local development and debugging.
+    """Build an ExecutionContext for a specific training task (local dev/debug).
 
-    Call this from a trainer/predictor's ``if __name__ == "__main__"`` block
-    so you can run/debug the file directly::
+    Call this from a trainer's ``if __name__ == "__main__"`` block::
 
         if __name__ == "__main__":
-            from mlplatform.runner import dev_context
-            ctx = dev_context("example_model/pipeline/train.yaml")
+            from mlplatform.runner import dev_train_context
+            ctx = dev_train_context("example_model/pipeline/train.yaml", task_id="train_model")
             trainer = MyTrainer()
             trainer.context = ctx
             trainer.train()
     """
-    workflow = load_workflow_config(dag_path, config_names=config_names)
-    model_cfg = workflow.models[model_index]
-    return _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
+    pipeline = ConfigLoaderFactory.load_pipeline_config(
+        pipeline_path, task_id=task_id, config_names=config_names
+    )
+    task_cfg = pipeline.tasks[0]
+    return _build_context(pipeline, task_cfg, profile, version, base_path, commit_hash)
 
 
-def dev_predict(
-    dag_path: str | Path,
+def dev_predict_context(
+    pipeline_path: str | Path,
     data: Any = None,
-    model_index: int = 0,
+    task_id: str = "predict",
     profile: str = "local",
     version: str = "dev",
     base_path: str | None = None,
     config_names: list[str] | None = None,
 ) -> Any:
-    """Run prediction locally for development and debugging.
+    """Run prediction for a specific task locally (dev/debug).
 
     When *data* is provided (a DataFrame), the framework I/O is skipped and
     ``predict`` is called directly.  When *data* is ``None``, the
@@ -64,9 +65,12 @@ def dev_predict(
     Switch between in-process and PySpark by passing *profile*:
     ``"local"`` (in-process) or ``"local-spark"`` (PySpark mapInPandas).
     """
-    workflow = load_workflow_config(dag_path, config_names=config_names)
-    model_cfg = workflow.models[model_index]
-    ctx = _build_context(workflow, model_cfg, profile, version, base_path)
+    pipeline = ConfigLoaderFactory.load_pipeline_config(
+        pipeline_path, task_id=task_id, config_names=config_names
+    )
+    task_cfg = pipeline.tasks[0]
+    model_cfg = task_cfg.to_model_config()
+    ctx = _build_context(pipeline, task_cfg, profile, version, base_path)
 
     predictor_cls = _resolve_class(model_cfg.module, BasePredictor)
     predictor = predictor_cls()
@@ -84,49 +88,70 @@ def dev_predict(
     return invocation.invoke(predictor, ctx, model_cfg)
 
 
+# Backward-compatible aliases
+dev_context = dev_train_context
+dev_predict = dev_predict_context
+
+
 def run_workflow(
     dag_path: str | Path,
+    task_id: str | None = None,
     profile: str = "local",
     version: str | None = None,
     base_path: str | None = None,
     commit_hash: str | None = None,
     config_names: list[str] | None = None,
 ) -> dict[str, str]:
-    """Run all models defined in a DAG workflow config.
+    """Run pipeline tasks. When task_id is given, runs only that task.
 
     Args:
-        dag_path: Path to the DAG YAML file.
+        dag_path: Path to the pipeline YAML file.
+        task_id: If provided, run only this task. Otherwise run all executable tasks.
         profile: Infrastructure profile name.
         version: Model version string (auto-generated if omitted).
         base_path: Artifact storage base path.
         commit_hash: Git commit hash for reproducibility tracking.
-        config_names: Config profile names to merge (overrides DAG ``config:`` key).
+        config_names: Config profile names to merge (overrides task ``config:`` key).
 
     Returns:
         Dict mapping model_name -> result status ("ok" or "error: <msg>").
     """
-    workflow = load_workflow_config(dag_path, config_names=config_names)
+    pipeline = ConfigLoaderFactory.load_pipeline_config(
+        dag_path, task_id=task_id, config_names=config_names
+    )
     version = version or _generate_version()
     prof = get_profile(profile)
-    log = get_logger("mlplatform.runner", workflow.log_level)
-    log.info("Running workflow '%s' (%s) profile=%s version=%s",
-             workflow.workflow_name, workflow.pipeline_type, profile, version)
-    if workflow.config_profiles:
-        log.info("Config profiles loaded: %s", workflow.config_profiles)
+    log = get_logger("mlplatform.runner", pipeline.log_level)
+    log.info(
+        "Running pipeline '%s' (%s) profile=%s version=%s",
+        pipeline.pipeline_name,
+        pipeline.pipeline_type,
+        profile,
+        version,
+    )
+    if pipeline.config_profiles:
+        log.info("Config profiles loaded: %s", pipeline.config_profiles)
+
+    # Only run tasks that have a module (executable)
+    executable_tasks = [t for t in pipeline.tasks if t.module]
+    if not executable_tasks:
+        log.warning("No executable tasks (with module) found in pipeline")
+        return {}
 
     results: dict[str, str] = {}
-    for model_cfg in workflow.models:
-        ctx = _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
+    for task_cfg in executable_tasks:
+        ctx = _build_context(pipeline, task_cfg, profile, version, base_path, commit_hash)
+        model_cfg = task_cfg.to_model_config()
         _log_framework_params(ctx, profile)
         try:
-            if workflow.pipeline_type == "training":
+            if pipeline.pipeline_type == "training":
                 _run_training(model_cfg, ctx)
             else:
                 invocation = prof.invocation_strategy_factory()
                 _run_prediction(model_cfg, ctx, invocation)
             results[model_cfg.model_name] = "ok"
         except Exception as exc:
-            ctx.log.error("Model '%s' failed: %s", model_cfg.model_name, exc)
+            ctx.log.error("Task '%s' failed: %s", task_cfg.task_id, exc)
             results[model_cfg.model_name] = f"error: {exc}"
     return results
 
@@ -138,8 +163,8 @@ def _generate_version() -> str:
 
 
 def _build_context(
-    workflow: WorkflowConfig,
-    model_cfg: ModelConfig,
+    pipeline: UnifiedPipelineConfig,
+    task_cfg: TaskConfig,
     profile: str,
     version: str,
     base_path: str | None,
@@ -149,22 +174,23 @@ def _build_context(
     base = base_path or "./artifacts"
     storage = prof.storage_factory(base)
     tracker = prof.tracker_factory(base)
-    log = get_logger(f"mlplatform.{model_cfg.model_name}", workflow.log_level)
+    model_name = task_cfg.model_name or task_cfg.task_id
+    log = get_logger(f"mlplatform.{model_name}", pipeline.log_level)
     registry = ArtifactRegistry(
         storage=storage,
-        feature_name=workflow.feature_name,
-        model_name=model_cfg.model_name,
+        feature_name=pipeline.feature_name,
+        model_name=model_name,
         version=version,
     )
     return ExecutionContext(
         artifacts=registry,
         experiment_tracker=tracker,
-        feature_name=workflow.feature_name,
-        model_name=model_cfg.model_name,
+        feature_name=pipeline.feature_name,
+        model_name=model_name,
         version=version,
-        optional_configs=model_cfg.optional_configs,
+        optional_configs=task_cfg.optional_configs,
         log=log,
-        _pipeline_type=workflow.pipeline_type,
+        _pipeline_type=pipeline.pipeline_type,
         commit_hash=commit_hash,
     )
 

@@ -1,41 +1,38 @@
-# Training pipeline DAG - framework config + Databricks-like orchestration structure.
-# Framework values (required by mlplatform)
-workflow_name: example_workflow_sequential
-execution_mode: sequential
+pipeline_name: example_workflow_sequential
 pipeline_type: training
 feature_name: example
-config_version: 2
-log_level: INFO
+schedule:
+  dev: ""
+  qa: "0 0 6 ? * MON"
+  prod: "0 0 6 ? * MON"
 
-# Databricks-like orchestration structure with framework task params merged in.
-# Config profiles are declared at task level (config: key inside each task).
-resources:
-  jobs:
-    schedule:
-      dev: "0 0 6 ? * MON"
-      qa: "0 0 6 ? * MON"
-      prod: "0 0 6 ? * MON"
+environments:
+  dev: true
+  qa: true
+  prod: false
 
-    environments:
-      dev: true
-      qa: true
-      prod: false
+tasks:
+  - task_id: train_model
+    task_type: training
+    config:
+      - global
+      - dev
+    model_name: example_model
+    compute: s
+    training_platform: VertexAI
+    module: "example_model.train"
+    
+  - task_id: evaluation
+    task_type: evaluation
+    compute: s
+    training_platform: VertexAI
+    module: "example_model.evaluate"
 
-    tasks:
-      - task_key: "train_model"
-        config:
-          - global
-          - dev
-        model_name: example_model
-        compute: s
-        training_platform: VertexAI
-        module: "example_model.train"
-        
-
-      - task_key: model_deployment
-        condition_task:
-          op: "EQUAL_TO"
-          left: "{{tasks.train_model.values.model_updated}}"
-          right: "1"
-        depends_on:
-          - task_key: [train_model]
+  - task_id: deploy
+    task_type: deploy
+    condition_task:
+      clause: "{{tasks.evaluation.values.model_updated}}"
+      operator: "EQUAL_TO"
+      value: "1"
+    depends_on:
+      - task_id: [evaluation]

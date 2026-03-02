@@ -35,7 +35,11 @@ class MyPredictor(BasePredictor):
 
 
 if __name__ == "__main__":
-    from mlplatform.runner import dev_predict
+    from mlplatform.runner import dev_predict_context
 
-    result = dev_predict(dag_path="example_model/pipeline/predict.yaml")
+    result = dev_predict_context(
+        pipeline_path="example_model/pipeline/predict.yaml",
+        task_id="predict",
+        config_names=["global", "predict-local"],
+    )
     print(result)

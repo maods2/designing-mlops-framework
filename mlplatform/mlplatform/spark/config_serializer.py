@@ -4,25 +4,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
-from mlplatform.config.schema import ModelConfig, WorkflowConfig
+from mlplatform.config.schema import ModelConfig, TaskConfig, UnifiedPipelineConfig
 
 
 def workflow_config_to_dict(
-    workflow: WorkflowConfig,
-    model: ModelConfig,
+    pipeline: UnifiedPipelineConfig,
+    task: Union[TaskConfig, ModelConfig],
     base_path: str = "./artifacts",
     version: str = "dev",
     profile: str = "local",
     commit_hash: str | None = None,
 ) -> dict[str, Any]:
-    """Serialize workflow + model config to JSON-serializable dict for cloud main.py."""
+    """Serialize pipeline + task config to JSON-serializable dict for cloud main.py."""
+    model = task.to_model_config() if isinstance(task, TaskConfig) else task
     return {
         "runtime_config": {
-            "workflow_name": workflow.workflow_name,
-            "pipeline_type": workflow.pipeline_type,
-            "feature_name": workflow.feature_name,
+            "workflow_name": pipeline.pipeline_name,
+            "pipeline_type": pipeline.pipeline_type,
+            "feature_name": pipeline.feature_name,
             "model_name": model.model_name,
             "module": model.module,
             "version": version,
@@ -40,16 +41,16 @@ def workflow_config_to_dict(
         "environment_metadata": {
             "base_path": base_path,
             "profile": profile,
-            "execution_mode": workflow.execution_mode,
-            "config_version": workflow.config_version,
-            "log_level": workflow.log_level,
+            "execution_mode": "sequential",
+            "config_version": 2,
+            "log_level": pipeline.log_level,
         },
     }
 
 
 def write_workflow_config(
-    workflow: WorkflowConfig,
-    model: ModelConfig,
+    pipeline: UnifiedPipelineConfig,
+    task: Union[TaskConfig, ModelConfig],
     path: str | Path,
     base_path: str = "./artifacts",
     version: str = "dev",
@@ -62,7 +63,7 @@ def write_workflow_config(
     with open(path, "w") as f:
         json.dump(
             workflow_config_to_dict(
-                workflow, model, base_path=base_path, version=version,
+                pipeline, task, base_path=base_path, version=version,
                 profile=profile, commit_hash=commit_hash,
             ),
             f,

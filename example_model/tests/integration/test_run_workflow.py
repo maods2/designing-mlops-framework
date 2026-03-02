@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import pytest
 
+from mlplatform.config.factory import ConfigLoaderFactory
 from mlplatform.runner import run_workflow, _build_context
-from mlplatform.config.loader import load_workflow_config
 
 
 class TestRunTrainingWorkflow:
-    def test_training_workflow_runs(self, legacy_train_dag_path, sample_train_data, artifacts_dir):
+    def test_training_workflow_runs(self, train_dag_path, sample_train_data, artifacts_dir):
         """Training workflow completes and model artifact is saved."""
-        workflow = load_workflow_config(legacy_train_dag_path)
-        model_cfg = workflow.models[0]
-        ctx = _build_context(workflow, model_cfg, "local", "test_v1", str(artifacts_dir))
+        pipeline = ConfigLoaderFactory.load_pipeline_config(
+            train_dag_path, task_id="train_model", config_names=["global", "train-local"]
+        )
+        task_cfg = pipeline.tasks[0]
+        ctx = _build_context(pipeline, task_cfg, "local", "test_v1", str(artifacts_dir))
         ctx.optional_configs["train_data"] = sample_train_data
 
         from example_model.train import MyTrainer
@@ -23,21 +25,24 @@ class TestRunTrainingWorkflow:
 
         model_path = (
             artifacts_dir
-            / workflow.feature_name
-            / model_cfg.model_name
+            / pipeline.feature_name
+            / task_cfg.model_name
             / "test_v1"
             / "model.pkl"
         )
         assert model_path.exists(), f"Model artifact not found at {model_path}"
 
-    def test_new_dag_format_loads_and_trains(self, train_dag_path, sample_train_data, artifacts_dir):
-        """New DAG format with resources.jobs.deployment.tasks loads and trains."""
-        workflow = load_workflow_config(train_dag_path)
-        assert workflow.pipeline_type == "training"
-        assert len(workflow.models) >= 1
+    def test_pipeline_loads_and_trains(self, train_dag_path, sample_train_data, artifacts_dir):
+        """New flat pipeline schema loads and trains."""
+        pipeline = ConfigLoaderFactory.load_pipeline_config(
+            train_dag_path, config_names=["global", "train-local"]
+        )
+        assert pipeline.pipeline_type == "training"
+        train_tasks = [t for t in pipeline.tasks if t.module]
+        assert len(train_tasks) >= 1
 
-        model_cfg = workflow.models[0]
-        ctx = _build_context(workflow, model_cfg, "local", "new_dag_v1", str(artifacts_dir))
+        task_cfg = train_tasks[0]
+        ctx = _build_context(pipeline, task_cfg, "local", "new_dag_v1", str(artifacts_dir))
         ctx.optional_configs["train_data"] = sample_train_data
 
         from example_model.train import MyTrainer
@@ -47,8 +52,8 @@ class TestRunTrainingWorkflow:
 
         model_path = (
             artifacts_dir
-            / workflow.feature_name
-            / model_cfg.model_name
+            / pipeline.feature_name
+            / task_cfg.model_name
             / "new_dag_v1"
             / "model.pkl"
         )
@@ -58,8 +63,8 @@ class TestRunTrainingWorkflow:
 class TestDevPredict:
     def test_predict_with_data(
         self,
-        legacy_train_dag_path,
-        legacy_predict_dag_path,
+        train_dag_path,
+        predict_dag_path,
         sample_train_data,
         sample_inference_df,
         artifacts_dir,
@@ -68,9 +73,13 @@ class TestDevPredict:
         import pandas as pd
 
         # Train first
-        train_wf = load_workflow_config(legacy_train_dag_path)
-        train_model = train_wf.models[0]
-        train_ctx = _build_context(train_wf, train_model, "local", "dev_test", str(artifacts_dir))
+        train_pipeline = ConfigLoaderFactory.load_pipeline_config(
+            train_dag_path, task_id="train_model", config_names=["global", "train-local"]
+        )
+        train_task = train_pipeline.tasks[0]
+        train_ctx = _build_context(
+            train_pipeline, train_task, "local", "dev_test", str(artifacts_dir)
+        )
         train_ctx.optional_configs["train_data"] = sample_train_data
 
         from example_model.train import MyTrainer
@@ -79,9 +88,13 @@ class TestDevPredict:
         trainer.train()
 
         # Predict
-        pred_wf = load_workflow_config(legacy_predict_dag_path)
-        pred_model = pred_wf.models[0]
-        pred_ctx = _build_context(pred_wf, pred_model, "local", "dev_test", str(artifacts_dir))
+        pred_pipeline = ConfigLoaderFactory.load_pipeline_config(
+            predict_dag_path, task_id="predict", config_names=["global", "predict-local"]
+        )
+        pred_task = pred_pipeline.tasks[0]
+        pred_ctx = _build_context(
+            pred_pipeline, pred_task, "local", "dev_test", str(artifacts_dir)
+        )
 
         from example_model.predict import MyPredictor
         predictor = MyPredictor()

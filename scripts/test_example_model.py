@@ -61,7 +61,7 @@ def test_run_prediction():
 
     X_test, _ = make_classification(n_samples=5, n_features=5, random_state=99)
     test_df = pd.DataFrame(X_test, columns=["f0", "f1", "f2", "f3", "f4"])
-    result = predictor.predict_chunk(test_df)
+    result = predictor.predict(test_df)
 
     assert "prediction" in result.columns, "Missing prediction column"
     assert len(result) == 5
@@ -105,6 +105,7 @@ def test_config_serializer():
 
 def test_pyspark_batch_prediction():
     """Test PySpark local batch prediction via spark/main.py mapInPandas."""
+    import json
     from mlplatform.config.loader import load_workflow_config
     from mlplatform.spark.config_serializer import write_workflow_config
     from mlplatform.spark.main import _run_spark_inference
@@ -121,8 +122,10 @@ def test_pyspark_batch_prediction():
     pd.DataFrame(X_test, columns=["f0", "f1", "f2", "f3", "f4"]).to_csv(csv_path, index=False)
 
     output_path = str(monorepo_root / "test_dist" / "spark_predictions.parquet")
+    with open(config_path) as f:
+        config = json.load(f)
     _run_spark_inference(
-        config_path=str(config_path),
+        config,
         input_path=str(csv_path),
         output_path=output_path,
     )

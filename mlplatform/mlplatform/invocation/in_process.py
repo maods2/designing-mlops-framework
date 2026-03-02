@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from mlplatform.data_io import load_prediction_input, write_prediction_output
 from mlplatform.invocation.base import InvocationStrategy
+from mlplatform.schema import get_schema_from_predictor
 
 if TYPE_CHECKING:
     from mlplatform.config.schema import ModelConfig
@@ -29,6 +30,9 @@ class InProcessInvocation(InvocationStrategy):
         context.log.info("Model loaded: %s", context.model_name)
 
         data = load_prediction_input(model_cfg)
+        schema = get_schema_from_predictor(predictor)
+        if schema:
+            schema.validate(data)
         result = predictor.predict(data)
         write_prediction_output(result, model_cfg)
         context.log.info("In-process prediction complete: %d rows", len(result))

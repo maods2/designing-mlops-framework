@@ -5,7 +5,12 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from mlplatform.schema import PredictionInputSchema, SchemaValidationError
+from mlplatform.schema import (
+    PredictionInputSchema,
+    SchemaValidationError,
+    from_feature_columns,
+    get_schema_from_predictor,
+)
 
 
 class TestPredictionInputSchemaInit:
@@ -78,3 +83,28 @@ class TestPredictionInputSchemaValidate:
         assert "f0" in msg
         assert "f1" in msg
         assert "f2" in msg
+
+
+class TestFromFeatureColumns:
+    def test_builds_schema_from_list(self):
+        schema = from_feature_columns(["f0", "f1", "f2"])
+        assert schema.column_names == ["f0", "f1", "f2"]
+        df = pd.DataFrame({"f0": [1.0], "f1": [2.0], "f2": [3.0]})
+        schema.validate(df)  # should not raise
+
+
+class TestGetSchemaFromPredictor:
+    def test_gets_schema_from_feature_columns(self):
+        from example_model.predict import MyPredictor
+
+        predictor = MyPredictor()
+        schema = get_schema_from_predictor(predictor)
+        assert schema is not None
+        assert schema.column_names == ["f0", "f1", "f2", "f3", "f4"]
+
+    def test_returns_none_when_no_schema(self):
+        class MinimalPredictor:
+            __module__ = "nonexistent.module"
+
+        schema = get_schema_from_predictor(MinimalPredictor())
+        assert schema is None

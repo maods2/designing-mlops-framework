@@ -1,24 +1,17 @@
 """Schema module for batch prediction input validation.
 
 Provides a simple way for data scientists to define clear input schemas for
-batch prediction. The framework validates data before calling predict().
+batch prediction. The framework validates data automatically before calling
+predict() — no manual validate() call needed.
 
-Example usage::
+Simplest usage (zero schema code): define FEATURE_COLUMNS in constants.py.
+The framework auto-derives validation from it.
+
+Explicit schema (when you need dtype checks or optional columns)::
 
     from mlplatform.schema import PredictionInputSchema
 
-    INPUT_SCHEMA = PredictionInputSchema(
-        columns=[
-            ("f0", "float64", True),
-            ("f1", "float64", True),
-            ("f2", "float64", True),
-            ("f3", "float64", True),
-            ("f4", "float64", True),
-        ]
-    )
-
-    # In predictor.predict():
-    INPUT_SCHEMA.validate(data)
+    INPUT_SCHEMA = PredictionInputSchema(columns=["f0", "f1", "f2", "f3", "f4"])
 """
 
 from __future__ import annotations
@@ -28,6 +21,57 @@ from typing import Any, Sequence
 
 class SchemaValidationError(ValueError):
     """Raised when a DataFrame does not match the expected schema."""
+
+
+def from_feature_columns(column_names: Sequence[str]) -> "PredictionInputSchema":
+    """Build a minimal schema from a list of required column names.
+
+    Use this when your predictor uses FEATURE_COLUMNS from constants.py.
+    The framework can auto-derive validation from this.
+
+    Example::
+
+        from mlplatform.schema import from_feature_columns
+        INPUT_SCHEMA = from_feature_columns(["f0", "f1", "f2", "f3", "f4"])
+    """
+    return PredictionInputSchema(columns=list(column_names))
+
+
+def get_schema_from_predictor(predictor: Any) -> PredictionInputSchema | None:
+    """Get validation schema from a predictor instance.
+
+    Looks for INPUT_SCHEMA in the predictor's module first. If not found,
+    tries to import the predictor's constants module (e.g. example_model.constants)
+    and build a schema from FEATURE_COLUMNS.
+
+    Returns:
+        A PredictionInputSchema to validate input data, or None if no schema
+        can be derived.
+    """
+    import importlib
+
+    predictor_cls = type(predictor)
+    module_name = predictor_cls.__module__
+
+    # 1. Check for explicit INPUT_SCHEMA in predictor module
+    mod = importlib.import_module(module_name)
+    schema = getattr(mod, "INPUT_SCHEMA", None)
+    if isinstance(schema, PredictionInputSchema):
+        return schema
+
+    # 2. Try constants module (e.g. example_model.constants from example_model.predict)
+    parts = module_name.split(".")
+    if len(parts) >= 2:
+        constants_name = f"{parts[0]}.constants"
+        try:
+            constants_mod = importlib.import_module(constants_name)
+            feature_cols = getattr(constants_mod, "FEATURE_COLUMNS", None)
+            if isinstance(feature_cols, (list, tuple)) and feature_cols:
+                return from_feature_columns(feature_cols)
+        except ImportError:
+            pass
+
+    return None
 
 
 class PredictionInputSchema:

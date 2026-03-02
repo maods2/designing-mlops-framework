@@ -1,0 +1,17 @@
+# Dev config profile - overrides for development environment.
+log_level: DEBUG
+base_path: ./dev_artifacts
+profile: local
+
+
+input_path: "example_model/data/sample_inference.csv"
+output_path: "artifacts/predictions.csv"
+
+# BigQuery I/O (used when file paths are absent or by SparkBatch)
+prediction_dataset_name: my_dataset
+prediction_table_name: scoring_features
+prediction_output_dataset_table: my_dataset.predictions_output
+
+unique_identifier_column: vin
+
+prediction_threshold: 0.5

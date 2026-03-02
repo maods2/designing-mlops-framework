@@ -11,73 +11,31 @@ log_level: INFO
 # Config profiles are declared at task level (config: key inside each task).
 resources:
   jobs:
-    deployment:
-      name: example-workflow-train
-      schedule:
-        dev: "0 0 6 ? * MON"
-        qa: "0 0 6 ? * MON"
-        prod: "0 0 6 ? * MON"
+    schedule:
+      dev: "0 0 6 ? * MON"
+      qa: "0 0 6 ? * MON"
+      prod: "0 0 6 ? * MON"
 
-      tags:
-        project_name: "example-model"
+    environments:
+      dev: true
+      qa: true
+      prod: false
 
-      environments:
-        - environment_key: default
-          spec:
-            client: "3"
-            dependencies:
-              - ../dist/*.whl
+    tasks:
+      - task_key: "train_model"
+        config:
+          - global
+          - dev
+        model_name: example_model
+        compute: s
+        training_platform: VertexAI
+        module: "example_model.train"
+        
 
-      tasks:
-        - task_key: "train_model"
-          environment_key: default
-
-          # Config profiles for this training task (override via --config CLI arg)
-          config:
-            - global
-            - dev
-
-          # Framework model config
-          model_name: example_model
-          compute: s
-          training_platform: VertexAI
-          module: "example_model.train"
-          optional_configs:
-            test_size: 0.2
-            # Local file fallback (used when bq_params is absent)
-            train_data_path: "example_model/data/sample_train.csv"
-            hyperparameters:
-              max_iter: 1000
-            # BigQuery parameters -- injected into sql/load_training_data.sql.
-            # Uncomment below to load training data from BigQuery instead of CSV.
-            # bq_params:
-            #   project: my-gcp-project
-            #   dataset: my_dataset
-            #   table: training_features
-            #   start_date: "2025-01-01"
-            #   end_date: "2025-12-31"
-            #   sample_fraction: 1.0
-            #   target_column: target
-
-          # Databricks spark task config
-          spark_python_task:
-            python_file: "../scripts/train.py"
-            parameters:
-              - "--root_path"
-              - "${workspace.root_path}"
-              - "--env"
-              - "${bundle.target}"
-              - "--git_sha"
-              - "${var.git_sha}"
-              - "--job_run_id"
-              - "{{job.run_id}}"
-              - "--branch"
-              - "${var.branch}"
-
-        - task_key: model_updated
-          condition_task:
-            op: "EQUAL_TO"
-            left: "{{tasks.train_model.values.model_updated}}"
-            right: "1"
-          depends_on:
-            - task_key: "train_model"
+      - task_key: model_deployment
+        condition_task:
+          op: "EQUAL_TO"
+          left: "{{tasks.train_model.values.model_updated}}"
+          right: "1"
+        depends_on:
+          - task_key: [train_model]

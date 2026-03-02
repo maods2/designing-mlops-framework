@@ -13,11 +13,15 @@ Config profiles are declared per-task via the ``config:`` key inside each task.
 
 Config profile merging
 ----------------------
-For each task that declares ``config: [global, dev]``:
+For each task that declares ``config: [global, predict-dev]``:
 
-1. Load ``<config_dir>/global.yaml`` then ``<config_dir>/dev.yaml``.
+1. Load ``<config_dir>/global.yaml`` then ``<config_dir>/predict-dev.yaml``.
 2. Deep-merge them in order (later keys override earlier ones).
-3. Framework top-level YAML values overlay the merged profile data (YAML wins).
+3. Merge the merged profile data into the task entry (task YAML overrides profile).
+4. ModelConfig is built from the merged result; extra keys go to optional_configs.
+
+Values from config profiles (e.g. input_path, output_path, prediction_threshold)
+flow into ModelConfig. Task-level values take precedence over profile values.
 
 ``config_dir`` defaults to ``config/`` relative to the DAG file's *parent
 directory* (i.e. alongside the model package), with fallback search upward.
@@ -90,15 +94,44 @@ def _load_config_profiles(
     return merged
 
 
+# Keys that map directly to ModelConfig fields (excluding optional_configs)
+_MODEL_CONFIG_KEYS = frozenset({
+    "model_name", "module", "compute", "training_platform", "serving_platform",
+    "prediction_dataset_name", "prediction_table_name", "model_id", "model_version",
+    "prediction_output_dataset_table", "predicted_label_column_name",
+    "predicted_timestamp_column_name", "predicted_probability_column_name",
+    "unique_identifier_column", "input_path", "output_path",
+})
+
+# Orchestration keys that should not be passed to ModelConfig
+_ORCHESTRATION_KEYS = frozenset({
+    "task_key", "config", "environment_key", "condition_task", "depends_on",
+    "spark_python_task",
+})
+
+
 def _parse_model_config(entry: dict[str, Any]) -> ModelConfig:
-    """Build a ModelConfig from a task or models-list entry."""
+    """Build a ModelConfig from a task or models-list entry.
+
+    The entry may be a merged result of config profiles + task YAML.
+    Extra top-level keys (e.g. prediction_threshold, base_path) go into
+    optional_configs.
+    """
     platform = entry.get("training_platform") or entry.get("serving_platform") or "VertexAI"
+
+    # Merge optional_configs with any extra top-level keys from config profiles
+    optional = dict(entry.get("optional_configs") or {})
+    for key, val in entry.items():
+        if key not in _MODEL_CONFIG_KEYS and key not in _ORCHESTRATION_KEYS:
+            if key not in optional:
+                optional[key] = val
+
     return ModelConfig(
         model_name=entry.get("model_name") or entry.get("task_key", "default"),
         module=entry.get("module", ""),
         compute=entry.get("compute", "s"),
         platform=platform,
-        optional_configs=entry.get("optional_configs") or {},
+        optional_configs=optional,
         prediction_dataset_name=entry.get("prediction_dataset_name"),
         prediction_table_name=entry.get("prediction_table_name"),
         model_id=entry.get("model_id"),
@@ -155,13 +188,10 @@ def load_workflow_config(
     all_config_profiles: list[str] = []
     models: list[ModelConfig] = []
 
-    # New format: resources.jobs.deployment.tasks
-    deployment = (
-        raw.get("resources", {})
-           .get("jobs", {})
-           .get("deployment", {})
-    )
-    task_entries = deployment.get("tasks") if deployment else None
+    # New format: resources.jobs.deployment.tasks or resources.jobs.tasks
+    jobs = raw.get("resources", {}).get("jobs", {})
+    deployment = jobs.get("deployment", {})
+    task_entries = deployment.get("tasks") if deployment else jobs.get("tasks")
 
     # effective holds merged profile data + raw; DAG values win (raw is merged last)
     effective: dict[str, Any] = raw
@@ -186,8 +216,10 @@ def load_workflow_config(
             profile_data = _load_config_profiles(task_profile_names, resolved_config_dir)
             # Overlay raw top-level values on the merged profiles (raw wins)
             effective = _deep_merge(profile_data, raw)
+            # Merge profile into task so config values (input_path, output_path, etc.) flow to model
+            merged_entry = _deep_merge(profile_data, task_entry)
 
-            models.append(_parse_model_config(task_entry))
+            models.append(_parse_model_config(merged_entry))
             for p in task_profile_names:
                 if p not in all_config_profiles:
                     all_config_profiles.append(p)
@@ -207,8 +239,11 @@ def load_workflow_config(
         effective = _deep_merge(profile_data, raw)
         all_config_profiles = top_profile_names
 
+        # Merge profile data into each model so config values flow to ModelConfig
+        effective_for_models = {k: v for k, v in effective.items() if k != "models"}
         for entry in effective.get("models", []):
-            models.append(_parse_model_config(entry))
+            merged_entry = _deep_merge(effective_for_models, entry)
+            models.append(_parse_model_config(merged_entry))
 
     # Top-level framework values — effective merges profile data with DAG YAML (DAG wins)
     pipeline_type = effective.get("pipeline_type", "training")

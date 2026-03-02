@@ -7,69 +7,30 @@ feature_name: example
 config_version: 2
 log_level: INFO
 
-# Databricks-like orchestration structure with framework task params merged in.
-# Config profiles are declared at task level (config: key inside each task).
 resources:
   jobs:
-    deployment:
-      name: example-workflow-predict
-      schedule:
-        dev: "0 0 8 ? * MON-FRI"
-        qa: "0 0 8 ? * MON-FRI"
-        prod: "0 0 8 ? * MON-FRI"
+    schedule:
+      dev: "0 0 6 ? * MON"
+      qa: "0 0 6 ? * MON"
+      prod: "0 0 6 ? * MON"
 
-      tags:
-        project_name: "example-model"
+    environments:
+      dev: true
+      qa: true
+      prod: false
 
-      environments:
-        - environment_key: default
-          spec:
-            client: "3"
-            dependencies:
-              - ../dist/*.whl
+    tasks:
+      - task_key: "run_prediction"
+        environment_key: default
+        model_name: example_model
+        serving_platform: VertexAI
+        module: "example_model.predict"
+        model_version: "latest"
 
-      tasks:
-        - task_key: "run_prediction"
-          environment_key: default
+        config:
+          - global
+          - predict-dev
 
-          # Config profiles for this prediction task (override via --config CLI arg)
-          config:
-            - global
-            - local
-
-          # Framework model config
-          model_name: example_model
-          serving_platform: VertexAI
-          module: "example_model.predict"
-          model_version: "latest"
-
-          # File-based I/O (used by InProcess and SparkBatch invocations)
-          input_path: "example_model/data/sample_inference.csv"
-          output_path: "artifacts/predictions.csv"
-
-          # BigQuery I/O (used when file paths are absent or by SparkBatch)
-          prediction_dataset_name: my_dataset
-          prediction_table_name: scoring_features
-          prediction_output_dataset_table: my_dataset.predictions_output
-
-          unique_identifier_column: vin
-          optional_configs:
-            prediction_threshold: 0.5
-            # BigQuery parameters -- injected into sql/load_prediction_data.sql.
-            # bq_params:
-            #   project: my-gcp-project
-            #   dataset: my_dataset
-            #   table: scoring_features
-            #   scoring_date: "2025-06-01"
-            #   unique_id_column: vin
-
-          # Databricks spark task config
-          spark_python_task:
-            python_file: "../scripts/predict.py"
-            parameters:
-              - "--root_path"
-              - "${workspace.root_path}"
-              - "--env"
-              - "${bundle.target}"
-              - "--job_run_id"
-              - "{{job.run_id}}"
+        # File-based I/O (used by InProcess and SparkBatch invocations)
+        input_path: "example_model/data/sample_inference.csv"
+        output_path: "artifacts/predictions.csv"

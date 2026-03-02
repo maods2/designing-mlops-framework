@@ -109,6 +109,7 @@ class SparkBatchInvocation(InvocationStrategy):
             from mlplatform.core.artifact_registry import ArtifactRegistry
             from mlplatform.core.context import ExecutionContext as Ctx
             from mlplatform.log import get_logger
+            from mlplatform.schema import get_schema_from_predictor
             from mlplatform.storage.local import LocalFileSystem
             from mlplatform.tracking.none import NoneTracker
 
@@ -137,8 +138,11 @@ class SparkBatchInvocation(InvocationStrategy):
             pred = pred_cls()
             pred.context = worker_ctx
             pred.load_model()
+            schema = get_schema_from_predictor(pred)
 
             for batch in iterator:
+                if schema:
+                    schema.validate(batch)
                 result = pred.predict(batch)
                 if not isinstance(result, pd.DataFrame):
                     result = pd.DataFrame({"prediction": result})

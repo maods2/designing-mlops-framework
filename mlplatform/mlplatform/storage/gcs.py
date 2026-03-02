@@ -55,3 +55,24 @@ class GCSStorage(Storage):
         blob.download_to_file(buf)
         buf.seek(0)
         return joblib.load(buf)
+
+    def list(self, prefix: str = "") -> list[str]:
+        """List immediate children under base_path/prefix (simulates directory listing)."""
+        list_prefix = self._blob_path(prefix)
+        if list_prefix and not list_prefix.endswith("/"):
+            list_prefix = list_prefix + "/"
+        elif not list_prefix:
+            list_prefix = ""
+        iterator = self._bucket.list_blobs(prefix=list_prefix, delimiter="/")
+        names: list[str] = []
+        # Iterate to trigger API call; prefixes are populated on the iterator
+        for blob in iterator:
+            rel = blob.name[len(list_prefix) :] if list_prefix else blob.name
+            if "/" not in rel and rel:
+                names.append(rel)
+        # Subdirectories (common prefixes)
+        for prefix_path in getattr(iterator, "prefixes", ()):
+            name = prefix_path.rstrip("/").split("/")[-1]
+            if name:
+                names.append(name)
+        return names

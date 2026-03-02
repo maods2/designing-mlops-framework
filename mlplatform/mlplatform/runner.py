@@ -12,6 +12,7 @@ from mlplatform.config.factory import ConfigLoaderFactory
 from mlplatform.config.schema import ModelConfig, TaskConfig, UnifiedPipelineConfig
 from mlplatform.core.artifact_path_builder import ArtifactPathBuilder
 from mlplatform.core.artifact_registry import ArtifactRegistry
+from mlplatform.core.version_resolver import resolve_version
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
 from mlplatform.core.trainer import BaseTrainer
@@ -192,11 +193,25 @@ def _build_context(
         artifact_bucket=effective_bucket,
         artifact_namespace=effective_namespace,
     )
+
+    # For prediction: resolve model_version (latest or specific); for training: use run version
+    if pipeline.pipeline_type == "prediction":
+        model_version = task_cfg.model_version or "latest"
+        effective_version = resolve_version(
+            storage_factory=prof.storage_factory,
+            artifact_base_path=f"{effective_bucket}/{effective_namespace}/{pipeline.feature_name}",
+            feature_name=pipeline.feature_name,
+            model_name=model_name,
+            model_version=model_version,
+        )
+    else:
+        effective_version = version
+
     # Artifacts are always stored under the training path; prediction loads from there
     paths = builder.build_artifact_paths(
         feature_name=pipeline.feature_name,
         model_name=model_name,
-        version=version,
+        version=effective_version,
         pipeline_type="training",
     )
     storage_base = paths.storage_base_path
@@ -204,8 +219,10 @@ def _build_context(
     registry_kwargs = {
         "storage_base_path": paths.storage_base_path,
         "artifact_path": paths.artifact_path,
+        "artifact_base_path": paths.artifact_base_path,
         "model_artifact_dir": paths.model_artifact_dir,
         "metrics_artifact_dir": paths.metrics_artifact_dir,
+        "storage_factory": prof.storage_factory,
     }
 
     storage = prof.storage_factory(storage_base)
@@ -215,7 +232,7 @@ def _build_context(
         storage=storage,
         feature_name=pipeline.feature_name,
         model_name=model_name,
-        version=version,
+        version=effective_version,
         **registry_kwargs,
     )
     return ExecutionContext(
@@ -223,7 +240,7 @@ def _build_context(
         experiment_tracker=tracker,
         feature_name=pipeline.feature_name,
         model_name=model_name,
-        version=version,
+        version=effective_version,
         optional_configs=task_cfg.optional_configs,
         log=log,
         _pipeline_type=pipeline.pipeline_type,

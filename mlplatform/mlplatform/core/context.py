@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from mlplatform.storage.base import Storage
     from mlplatform.tracking.base import ExperimentTracker
 
-from mlplatform.core.artifact_registry import ArtifactRegistry
+from mlplatform.core.artifact_registry import ArtifactRegistryProtocol
 
 
 def _get_by_dotted_key(d: dict[str, Any], key: str, default: Any) -> Any:
@@ -60,7 +60,7 @@ class ExecutionContext:
     tracking.
     """
 
-    artifacts: ArtifactRegistry
+    artifacts: ArtifactRegistryProtocol
     experiment_tracker: Optional[ExperimentTracker]
     feature_name: str
     model_name: str

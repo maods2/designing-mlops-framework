@@ -16,3 +16,12 @@ class Storage(ABC):
     def load(self, path: str) -> Any:
         """Load an object from the given path."""
         ...
+
+    @abstractmethod
+    def list(self, prefix: str = "") -> list[str]:
+        """List immediate children (files or subdirs) under base_path/prefix.
+
+        Returns names only (no full paths). Used for version resolution (e.g. listing
+        version directories to find 'latest').
+        """
+        ...

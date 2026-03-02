@@ -99,6 +99,7 @@ class SparkBatchInvocation(InvocationStrategy):
             if hasattr(context.storage, "base_path")
             else "./artifacts"
         )
+        artifacts = context.artifacts
         ctx_kwargs = {
             "feature_name": context.feature_name,
             "model_name": context.model_name,
@@ -107,29 +108,45 @@ class SparkBatchInvocation(InvocationStrategy):
             "pipeline_type": context._pipeline_type,
             "storage_base": storage_base,
             "storage_base_path": (
-                context.artifacts._storage_base_path
-                if hasattr(context.artifacts, "_storage_base_path")
-                and context.artifacts._storage_base_path is not None
+                artifacts._storage_base_path
+                if hasattr(artifacts, "_storage_base_path")
+                and artifacts._storage_base_path is not None
                 else None
             ),
+            "artifact_path": getattr(artifacts, "artifact_path", None),
+            "artifact_base_path": getattr(artifacts, "_artifact_base_path", None),
+            "model_artifact_dir": getattr(artifacts, "model_artifact_dir", None),
+            "metrics_artifact_dir": getattr(artifacts, "metrics_artifact_dir", None),
+            "storage_factory": getattr(artifacts, "_storage_factory", None),
         }
 
         def predict_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
             from mlplatform.core.artifact_registry import ArtifactRegistry
             from mlplatform.core.context import ExecutionContext as Ctx
             from mlplatform.log import get_logger
+            from mlplatform.profiles.registry import get_profile
             from mlplatform.schema import get_schema_from_predictor
-            from mlplatform.storage.local import LocalFileSystem
             from mlplatform.tracking.none import NoneTracker
 
             mod = importlib.import_module(predictor_module)
             pred_cls = getattr(mod, predictor_class_name)
 
             base = ctx_kwargs["storage_base"]
-            storage = LocalFileSystem(base_path=base)
-            registry_kwargs: dict[str, Any] = {}
+            profile_name = "cloud-batch" if str(base).startswith("gs://") else "local"
+            prof = get_profile(profile_name)
+            storage = prof.storage_factory(base)
+            registry_kwargs: dict[str, Any] = {
+                "artifact_base_path": ctx_kwargs.get("artifact_base_path"),
+                "storage_factory": prof.storage_factory,
+            }
             if ctx_kwargs.get("storage_base_path"):
                 registry_kwargs["storage_base_path"] = ctx_kwargs["storage_base_path"]
+            if ctx_kwargs.get("artifact_path"):
+                registry_kwargs["artifact_path"] = ctx_kwargs["artifact_path"]
+            if ctx_kwargs.get("model_artifact_dir"):
+                registry_kwargs["model_artifact_dir"] = ctx_kwargs["model_artifact_dir"]
+            if ctx_kwargs.get("metrics_artifact_dir"):
+                registry_kwargs["metrics_artifact_dir"] = ctx_kwargs["metrics_artifact_dir"]
             registry = ArtifactRegistry(
                 storage=storage,
                 feature_name=ctx_kwargs["feature_name"],

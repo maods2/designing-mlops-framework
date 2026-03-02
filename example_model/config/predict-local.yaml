@@ -1,8 +1,13 @@
 # Dev config profile - overrides for development environment.
 log_level: DEBUG
-base_path: ./dev_artifacts
+base_path: ./local_artifacts  # match train-local so prediction finds artifacts
 profile: local
 env: local
+model_version: "latest"  # or specify e.g. "2025-01-15-10-30" for a specific version
+
+# File-based I/O for local runs
+input_path: "example_model/data/sample_inference.csv"
+output_path: "artifacts/predictions.csv"
 
 # BigQuery I/O (used when file paths are absent or by SparkBatch)
 prediction_dataset_name: my_dataset
@@ -11,5 +16,3 @@ prediction_output_dataset_table: my_dataset.predictions_output
 
 optional_configs:
   prediction_threshold: 0.5
-  input_path: "example_model/data/sample_inference.csv"
-  output_path: "artifacts/predictions.csv"

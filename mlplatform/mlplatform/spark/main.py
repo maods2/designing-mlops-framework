@@ -67,12 +67,14 @@ def _build_context_from_config(config: dict[str, Any]):
     """Build an ExecutionContext using the profile system."""
     from mlplatform.core.artifact_registry import ArtifactRegistry
     from mlplatform.core.context import ExecutionContext
+    from mlplatform.core.version_resolver import resolve_version
     from mlplatform.log import get_logger
     from mlplatform.profiles.registry import get_profile
 
     runtime = config.get("runtime_config", {})
     env_meta = config.get("environment_metadata", {})
     profile_name = env_meta.get("profile", "local")
+    pipeline_type = runtime.get("pipeline_type", "training")
 
     # Use standardized paths when serialized by config_serializer
     storage_base = env_meta.get("storage_base_path")
@@ -81,22 +83,56 @@ def _build_context_from_config(config: dict[str, Any]):
     metrics_path = env_meta.get("metrics_path")
 
     prof = get_profile(profile_name)
-    storage = prof.storage_factory(storage_base)
-    tracker = prof.tracker_factory(storage_base, metrics_path=metrics_path)
-
     feature = runtime.get("feature_name", "default")
     model = runtime.get("model_name", "default")
     ver = runtime.get("version", "dev")
 
+    # For prediction: resolve model_version (latest or specific)
+    if pipeline_type == "prediction":
+        model_version = runtime.get("model_version", "latest")
+        artifact_paths = runtime.get("artifact_paths", {})
+        artifact_base = artifact_paths.get("artifact_base_path")
+        if artifact_base:
+            ver = resolve_version(
+                storage_factory=prof.storage_factory,
+                artifact_base_path=artifact_base,
+                feature_name=feature,
+                model_name=model,
+                model_version=model_version,
+            )
+        elif model_version and model_version.lower() != "latest":
+            ver = model_version
+
     artifact_paths = runtime.get("artifact_paths", {})
-    registry_kwargs: dict[str, Any] = {}
-    if artifact_paths:
+    artifact_base = artifact_paths.get("artifact_base_path")
+
+    # For prediction with resolved "latest", rebuild paths with resolved version
+    if pipeline_type == "prediction" and artifact_base:
+        model_train_version = f"{feature}_{model}_train_{ver}"
+        storage_base = f"{artifact_base}/{model_train_version}/model"
         registry_kwargs = {
-            "storage_base_path": artifact_paths.get("storage_base_path"),
-            "artifact_path": artifact_paths.get("artifact_path"),
-            "model_artifact_dir": artifact_paths.get("model_artifact_dir"),
-            "metrics_artifact_dir": artifact_paths.get("metrics_artifact_dir"),
+            "storage_base_path": storage_base,
+            "artifact_path": f"{artifact_base}/{model_train_version}/",
+            "artifact_base_path": artifact_base,
+            "model_artifact_dir": f"{model_train_version}/model",
+            "metrics_artifact_dir": f"{model_train_version}/metrics",
+            "storage_factory": prof.storage_factory,
         }
+    else:
+        registry_kwargs = {
+            "artifact_base_path": artifact_base,
+            "storage_factory": prof.storage_factory,
+        }
+        if artifact_paths:
+            registry_kwargs.update({
+                "storage_base_path": artifact_paths.get("storage_base_path"),
+                "artifact_path": artifact_paths.get("artifact_path"),
+                "model_artifact_dir": artifact_paths.get("model_artifact_dir"),
+                "metrics_artifact_dir": artifact_paths.get("metrics_artifact_dir"),
+            })
+
+    storage = prof.storage_factory(storage_base)
+    tracker = prof.tracker_factory(storage_base, metrics_path=metrics_path)
 
     registry = ArtifactRegistry(
         storage=storage,
@@ -113,7 +149,7 @@ def _build_context_from_config(config: dict[str, Any]):
         version=ver,
         optional_configs=runtime.get("optional_configs", {}),
         log=get_logger(f"mlplatform.spark.{model}"),
-        _pipeline_type=runtime.get("pipeline_type", ""),
+        _pipeline_type=pipeline_type,
         commit_hash=runtime.get("commit_hash"),
     )
 

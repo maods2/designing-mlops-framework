@@ -25,3 +25,10 @@ class LocalFileSystem(Storage):
     def load(self, path: str) -> Any:
         full_path = self._resolve_path(path)
         return joblib.load(full_path)
+
+    def list(self, prefix: str = "") -> list[str]:
+        """List immediate children under base_path/prefix."""
+        target = self._resolve_path(prefix) if prefix else self.base_path
+        if not target.exists() or not target.is_dir():
+            return []
+        return [p.name for p in target.iterdir()]

@@ -34,7 +34,7 @@ class MyPredictor(BasePredictor):
         self._scaler = self.context.load_artifact(cons.SCALER_ARTIFACT)
         return self._model
 
-    def predict_chunk(self, data: Any) -> pd.DataFrame:
+    def predict(self, data: Any) -> pd.DataFrame:
         """Run prediction on a chunk of data.
 
         Receives a DataFrame from the invocation strategy (InProcess reads
@@ -77,7 +77,7 @@ if __name__ == "__main__":
 
     data = load_file(args.input) if args.input else None
     result = dev_predict(
-        dag_path="example_model/pipeline/dags/predict.yaml",
+        dag_path="example_model/pipeline/predict.yaml",
         data=data,
         profile=args.profile,
     )

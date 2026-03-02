@@ -10,8 +10,8 @@ class BasePredictor(ABC):
     """Base class for prediction. Same core used across batch-local, online-REST, batch-Spark.
 
     Implementations must define:
-    - load_model(): load model artifacts (called before predict_chunk)
-    - predict_chunk(data): run prediction on a chunk of data
+    - load_model(): load model artifacts (called before predict)
+    - predict(data): run prediction on a chunk of data
     """
 
     @abstractmethod
@@ -21,6 +21,6 @@ class BasePredictor(ABC):
         ...
 
     @abstractmethod
-    def predict_chunk(self, data: Any) -> Any:
+    def predict(self, data: Any) -> Any:
         """Run prediction on a chunk of data. Returns predictions."""
         ...

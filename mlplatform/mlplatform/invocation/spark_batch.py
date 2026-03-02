@@ -23,7 +23,7 @@ class SparkBatchInvocation(InvocationStrategy):
     - BigQuery: ``prediction_dataset_name.prediction_table_name`` via
       the spark-bigquery-connector
 
-    Each partition independently loads the model and runs predict_chunk.
+    Each partition independently loads the model and runs predict.
     Works identically for local Spark and cloud Spark (Dataproc/VertexAI).
     """
 
@@ -139,7 +139,7 @@ class SparkBatchInvocation(InvocationStrategy):
             pred.load_model()
 
             for batch in iterator:
-                result = pred.predict_chunk(batch)
+                result = pred.predict(batch)
                 if not isinstance(result, pd.DataFrame):
                     result = pd.DataFrame({"prediction": result})
                 yield result

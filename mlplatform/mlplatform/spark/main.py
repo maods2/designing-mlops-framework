@@ -1,14 +1,13 @@
 """Unified Spark entry point for both local and cloud execution.
 
 Usage:
-  Local:  python main.py --config <path.json>
-  Cloud:  spark-submit main.py --py-files root.zip -- --config <path.json>
+  Local (no zip):     python main.py --config <path.json>
+  Local (with zip):   python main.py --config <path.json> --packages dist/root.zip
+  Cloud spark-submit: spark-submit main.py --py-files dist/root.zip -- --config <path.json>
 
-The config JSON is produced by config_serializer.write_workflow_config().
-This module is kept simple and flexible: it loads zip-packaged DS model code
-dynamically and dispatches to either training or prediction via the profile
-system. The same entry point works for both local Spark and cloud Spark
-(Dataproc / VertexAI).
+Path resolution:
+  if --packages provided: add each zip to sys.path (cloud-like mode)
+  else: add project_root and mlplatform to sys.path (local dev mode)
 """
 
 from __future__ import annotations
@@ -19,6 +18,15 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+
+
+def _bootstrap_local_paths(project_root: Path | None = None) -> None:
+    """Add project_root and mlplatform to sys.path for local dev testing."""
+    if project_root is None:
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+    for p in [str(project_root), str(project_root / "mlplatform")]:
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
 
 def _add_packages_to_path(packages: str) -> None:
@@ -37,7 +45,6 @@ def _load_config(config_path: str) -> dict[str, Any]:
     if config_path.startswith("gs://"):
         try:
             from google.cloud import storage as gcs
-
             parts = config_path[5:].split("/", 1)
             bucket_name, blob_path = parts[0], parts[1]
             client = gcs.Client()
@@ -92,7 +99,11 @@ def _build_context_from_config(config: dict[str, Any]):
     )
 
 
-def _build_model_cfg_from_config(config: dict[str, Any]):
+def _build_model_cfg_from_config(
+    config: dict[str, Any],
+    input_path: str | None = None,
+    output_path: str | None = None,
+):
     """Reconstruct a ModelConfig from the serialized runtime config."""
     from mlplatform.config.schema import ModelConfig
 
@@ -104,8 +115,8 @@ def _build_model_cfg_from_config(config: dict[str, Any]):
         platform=runtime.get("platform", "VertexAI"),
         optional_configs=runtime.get("optional_configs", {}),
         model_version=runtime.get("model_version", "latest"),
-        input_path=runtime.get("input_path"),
-        output_path=runtime.get("output_path"),
+        input_path=input_path or runtime.get("input_path"),
+        output_path=output_path or runtime.get("output_path"),
         prediction_dataset_name=runtime.get("prediction_dataset_name"),
         prediction_table_name=runtime.get("prediction_table_name"),
         prediction_output_dataset_table=runtime.get("prediction_output_dataset_table"),
@@ -153,14 +164,24 @@ def _run_spark_training(config: dict[str, Any]) -> None:
     ctx.log.info("Spark training completed")
 
 
-def _run_spark_inference(config: dict[str, Any]) -> None:
-    """Run distributed inference via SparkBatchInvocation."""
+def _run_spark_inference(
+    config: dict[str, Any],
+    input_path: str | None = None,
+    output_path: str | None = None,
+) -> None:
+    """Run distributed inference via SparkBatchInvocation.
+
+    Args:
+        config: Serialized runtime config dict.
+        input_path: Override input path from CLI (optional).
+        output_path: Override output path from CLI (optional).
+    """
     from mlplatform.core.predictor import BasePredictor
     from mlplatform.invocation.spark_batch import SparkBatchInvocation
 
     ctx = _build_context_from_config(config)
     _log_framework_params(ctx, config)
-    model_cfg = _build_model_cfg_from_config(config)
+    model_cfg = _build_model_cfg_from_config(config, input_path=input_path, output_path=output_path)
     predictor_cls = _resolve_class_from_config(config, BasePredictor)
     predictor = predictor_cls()
     predictor.context = ctx
@@ -172,18 +193,43 @@ def _run_spark_inference(config: dict[str, Any]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="MLPlatform Spark entry point.")
     parser.add_argument("--config", required=True, help="Path to run config JSON (local or gs://)")
-    parser.add_argument("--packages", help="Comma-separated paths to zip packages (e.g. root.zip)")
+    parser.add_argument(
+        "--input-path",
+        help="Override input path from config (file path or gs:// URI)",
+    )
+    parser.add_argument(
+        "--output-path",
+        help="Override output path from config (file path or gs:// URI)",
+    )
+    parser.add_argument(
+        "--packages",
+        help="Comma-separated paths to zip packages (e.g. dist/root.zip). "
+             "When provided, zips are added to sys.path. "
+             "When omitted, project_root is added for local dev mode.",
+    )
+    parser.add_argument(
+        "--project-root",
+        help="Project root for local path bootstrap (default: inferred). "
+             "Only used when --packages is not provided.",
+    )
     args, _ = parser.parse_known_args()
 
     if args.packages:
         _add_packages_to_path(args.packages)
+    else:
+        project_root = Path(args.project_root).resolve() if args.project_root else None
+        _bootstrap_local_paths(project_root)
 
     config = _load_config(args.config)
     pipeline_type = config.get("runtime_config", {}).get("pipeline_type", "inference")
 
     try:
         if pipeline_type in ("prediction", "inference"):
-            _run_spark_inference(config)
+            _run_spark_inference(
+                config,
+                input_path=args.input_path,
+                output_path=args.output_path,
+            )
         else:
             _run_spark_training(config)
         return 0

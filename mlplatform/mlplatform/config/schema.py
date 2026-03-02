@@ -42,3 +42,4 @@ class WorkflowConfig:
     config_version: int
     models: list[ModelConfig]
     log_level: str = "INFO"
+    config_profiles: list[str] = field(default_factory=list)

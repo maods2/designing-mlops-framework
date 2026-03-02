@@ -26,6 +26,7 @@ def dev_context(
     version: str = "dev",
     base_path: str | None = None,
     commit_hash: str | None = None,
+    config_names: list[str] | None = None,
 ) -> ExecutionContext:
     """Build an ExecutionContext for local development and debugging.
 
@@ -34,12 +35,12 @@ def dev_context(
 
         if __name__ == "__main__":
             from mlplatform.runner import dev_context
-            ctx = dev_context("template_training_dag.yaml")
+            ctx = dev_context("example_model/pipeline/train.yaml")
             trainer = MyTrainer()
             trainer.context = ctx
             trainer.train()
     """
-    workflow = load_workflow_config(dag_path)
+    workflow = load_workflow_config(dag_path, config_names=config_names)
     model_cfg = workflow.models[model_index]
     return _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
 
@@ -51,18 +52,19 @@ def dev_predict(
     profile: str = "local",
     version: str = "dev",
     base_path: str | None = None,
+    config_names: list[str] | None = None,
 ) -> Any:
     """Run prediction locally for development and debugging.
 
     When *data* is provided (a DataFrame), the framework I/O is skipped and
-    ``predict_chunk`` is called directly.  When *data* is ``None``, the
+    ``predict`` is called directly.  When *data* is ``None``, the
     profile's ``InvocationStrategy`` handles data loading from the
     YAML-configured source.
 
     Switch between in-process and PySpark by passing *profile*:
     ``"local"`` (in-process) or ``"local-spark"`` (PySpark mapInPandas).
     """
-    workflow = load_workflow_config(dag_path)
+    workflow = load_workflow_config(dag_path, config_names=config_names)
     model_cfg = workflow.models[model_index]
     ctx = _build_context(workflow, model_cfg, profile, version, base_path)
 
@@ -73,7 +75,7 @@ def dev_predict(
     ctx.log.info("Model loaded: %s", model_cfg.model_name)
 
     if data is not None:
-        result = predictor.predict_chunk(data)
+        result = predictor.predict(data)
         ctx.log.info("Dev prediction complete (manual data): %d rows", len(result))
         return result
 
@@ -88,17 +90,29 @@ def run_workflow(
     version: str | None = None,
     base_path: str | None = None,
     commit_hash: str | None = None,
+    config_names: list[str] | None = None,
 ) -> dict[str, str]:
     """Run all models defined in a DAG workflow config.
 
-    Returns a dict mapping model_name -> result status.
+    Args:
+        dag_path: Path to the DAG YAML file.
+        profile: Infrastructure profile name.
+        version: Model version string (auto-generated if omitted).
+        base_path: Artifact storage base path.
+        commit_hash: Git commit hash for reproducibility tracking.
+        config_names: Config profile names to merge (overrides DAG ``config:`` key).
+
+    Returns:
+        Dict mapping model_name -> result status ("ok" or "error: <msg>").
     """
-    workflow = load_workflow_config(dag_path)
+    workflow = load_workflow_config(dag_path, config_names=config_names)
     version = version or _generate_version()
     prof = get_profile(profile)
     log = get_logger("mlplatform.runner", workflow.log_level)
     log.info("Running workflow '%s' (%s) profile=%s version=%s",
              workflow.workflow_name, workflow.pipeline_type, profile, version)
+    if workflow.config_profiles:
+        log.info("Config profiles loaded: %s", workflow.config_profiles)
 
     results: dict[str, str] = {}
     for model_cfg in workflow.models:

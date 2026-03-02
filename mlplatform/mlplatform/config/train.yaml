@@ -1,0 +1,22 @@
+# Step config template for training - runner, storage, and tracking backends per environment.
+# Lives in mlplatform/config/ (framework-level config).
+# Module and class are provided by the DAG YAML; this file defines runner/storage/etb env mapping.
+name: train
+type: train
+envs:
+  dev:
+    runner: LocalRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+  local_spark:
+    runner: LocalSparkRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+    runner_config:
+      direct: true
+  prod:
+    runner: DataprocSparkRunner
+    storage: LocalFileSystem
+    etb: LocalJsonTracker
+    runner_config:
+      cluster: my-dataproc-cluster

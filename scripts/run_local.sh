@@ -1,6 +1,7 @@
 #!/bin/bash
 #
 # Run the full local workflow: training, in-process prediction, and PySpark batch prediction.
+# See docs/PYSPARK_RUNNING_ORDERS.md for the canonical PySpark run reference.
 #
 # Usage:
 #   cd /workspaces/ml-platform-v2

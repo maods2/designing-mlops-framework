@@ -495,7 +495,8 @@ spark-submit \
   -- \
   --config gs://bucket/spark_config.json \
   --input-path gs://bucket/input.parquet \
-  --output-path gs://bucket/predictions.parquet
+  --output-path gs://bucket/predictions.parquet \
+  --packages dist/root.zip
 ```
 
 The `root.zip` contains your model package and the `mlplatform` framework so Spark workers can import both.
@@ -507,7 +508,7 @@ For cloud execution the pattern is:
 1. **Package**: `mlplatform build-package` creates `dist/root.zip` containing your model code + the framework
 2. **Serialize config**: `write_workflow_config()` produces a JSON that `spark/main.py` reads
 3. **Upload**: Put `main.py`, `root.zip`, and the config JSON to GCS
-4. **Submit**: Use `gcloud dataproc jobs submit pyspark` or VertexAI custom training with `main.py` as the entry point and `root.zip` as `--py-files`
+4. **Submit**: Use `gcloud dataproc jobs submit pyspark` or VertexAI custom training with `main.py` as the entry point, `root.zip` as `--py-files`, and `--packages dist/root.zip` so imports resolve on driver and workers (see [docs/PYSPARK_RUNNING_ORDERS.md](docs/PYSPARK_RUNNING_ORDERS.md))
 
 The same `spark/main.py` handles both training (runs on driver) and prediction (distributes via `mapInPandas`).
 

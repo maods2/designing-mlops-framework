@@ -62,8 +62,10 @@ export PYTHONPATH="$(pwd):$(pwd)/mlplatform"
 
 ```
 my_project/
-  template_training_dag.yaml      # Training DAG config
-  template_prediction_dag.yaml    # Prediction DAG config
+  config/                         # Config profiles (global, local, dev, prod)
+    global.yaml
+    local.yaml
+    dev.yaml
   my_model/                       # Your model package
     __init__.py
     constants.py
@@ -71,51 +73,172 @@ my_project/
     train.py                      # Implements BaseTrainer
     predict.py                    # Implements BasePredictor
     data/                         # Local sample data for development
+    pipeline/                     # DAG YAML files only
+      train.yaml
+      predict.yaml
   mlplatform/                     # Framework package
-    mlplatform/                   # Python package source
-    requirements.txt              # Framework dependencies
+    mlplatform/
+      config/                     # Generic step config templates + loader + schema
+        train.yaml
+        inference.yaml
+        loader.py
+        schema.py
+      schema.py                   # PredictionInputSchema
     pyproject.toml
+  tests/                          # pytest test suite
+    unit/
+    integration/
+    e2e/
+  .github/workflows/
+    ci.yml                        # CI (lint + tests)
+    cd.yml                        # CD scaffold (disabled)
 ```
 
 ## DAG Configuration
 
-All pipelines are driven by a single YAML file. There are two types: training and prediction.
+All pipelines are driven by a single YAML file in `my_model/pipeline/`. Two pipeline types are supported: training and prediction.
 
-### Training DAG
+### New Format (recommended)
+
+The new format combines framework values with a Databricks-like `resources.jobs.deployment` block for orchestration and a `config:` key for profile merging:
 
 ```yaml
+# my_model/pipeline/train.yaml
+config:
+  - global
+  - dev
+
 workflow_name: my_workflow
-execution_mode: sequential        # sequential or parallel
+execution_mode: sequential
 pipeline_type: training
-feature_name: my_feature          # Groups artifacts under this feature
+feature_name: my_feature
 config_version: 2
-log_level: INFO                   # Optional: DEBUG, INFO, WARNING, ERROR
+
 models:
-  - model_name: my_model_v1      # Unique model identifier
-    compute: s                    # xs, s, m, l (cloud compute size)
-    training_platform: VertexAI   # VertexAI or Dataproc
-    module: "my_model.train"      # Python module containing your BaseTrainer subclass
+  - model_name: my_model_v1
+    compute: s
+    training_platform: VertexAI
+    module: "my_model.train"
     optional_configs:
       test_size: 0.2
       hyperparameters:
         max_iter: 1000
+
+resources:
+  jobs:
+    deployment:
+      name: my-workflow-train
+      schedule:
+        dev: "0 0 6 ? * MON"
+        prod: "0 0 6 ? * MON"
+      tasks:
+        - task_key: "train_model"
+          spark_python_task:
+            python_file: "../scripts/train.py"
 ```
 
-### Prediction DAG
-
 ```yaml
+# my_model/pipeline/predict.yaml
+config:
+  - global
+  - local
+
 workflow_name: my_workflow_prediction
 execution_mode: sequential
 pipeline_type: prediction
 feature_name: my_feature
 config_version: 2
+
 models:
   - model_name: my_model_v1
     serving_platform: VertexAI
-    module: "my_model.predict"    # Python module containing your BasePredictor subclass
+    module: "my_model.predict"
     model_version: "latest"
+    input_path: "my_model/data/sample_inference.csv"
+    output_path: "artifacts/predictions.csv"
     optional_configs:
       prediction_threshold: 0.5
+```
+
+### Key Fields
+
+| Field | Description |
+|---|---|
+| `config` | List of config profile names to merge (e.g. `[global, dev]`) |
+| `pipeline_type` | `training` or `prediction` |
+| `feature_name` | Top-level artifact grouping |
+| `model_name` | Unique identifier; artifacts stored at `{feature}/{model}/{version}/` |
+| `module` | Dotted Python path to the module with your trainer or predictor class |
+| `optional_configs` | Free-form dict passed to your code via `ctx.optional_configs` |
+| `resources.jobs.deployment` | Databricks-like orchestration block (optional) |
+
+## Config Profiles
+
+Config profiles allow environment-specific settings to be declared outside the DAG YAML and merged at load time.
+
+### Config file layout
+
+```
+config/
+  global.yaml     # Baseline settings
+  local.yaml      # Local dev overrides
+  dev.yaml        # Development environment overrides
+```
+
+### Example files
+
+```yaml
+# config/global.yaml
+log_level: INFO
+base_path: ./artifacts
+
+# config/dev.yaml
+log_level: DEBUG
+base_path: ./dev_artifacts
+```
+
+### Merging rules
+
+1. Profiles are loaded in order: `global` first, then `dev`.
+2. Later profiles override earlier ones (deep merge).
+3. DAG YAML values override all profiles.
+
+### CLI override
+
+```bash
+# Use profiles declared in the DAG YAML
+mlplatform run --dag my_model/pipeline/train.yaml
+
+# Override with explicit profile list
+mlplatform run --dag my_model/pipeline/train.yaml --config global,local
+```
+
+## Input Schema Validation
+
+Use `PredictionInputSchema` to declare the expected input columns, dtypes, and required/optional flags. The framework validates data before calling `predict()`.
+
+```python
+# my_model/predict.py
+from mlplatform.schema import PredictionInputSchema
+
+INPUT_SCHEMA = PredictionInputSchema(
+    columns=[
+        ("f0", "float64", True),
+        ("f1", "float64", True),
+        ("f2", "float64", True),
+    ]
+)
+
+class MyPredictor(BasePredictor):
+    def predict(self, data):
+        INPUT_SCHEMA.validate(data)  # raises SchemaValidationError on mismatch
+        ...
+```
+
+Simple form (column names only, all required, no dtype check):
+
+```python
+INPUT_SCHEMA = PredictionInputSchema(columns=["f0", "f1", "f2"])
 ```
 
 ### Key Fields
@@ -177,7 +300,7 @@ if __name__ == "__main__":
 
 ### Predictor (prediction)
 
-Create a file that extends `BasePredictor` and implements `load_model()` and `predict_chunk()`:
+Create a file that extends `BasePredictor` and implements `load_model()` and `predict()`:
 
 ```python
 """Prediction: MyPredictor."""
@@ -197,18 +320,18 @@ class MyPredictor(BasePredictor):
     def load_model(self):
         self._model = self.context.load_artifact("model.pkl")
 
-    def predict_chunk(self, data) -> pd.DataFrame:
+    def predict(self, data) -> pd.DataFrame:
         df = data if isinstance(data, pd.DataFrame) else pd.DataFrame(data)
         predictions = self._model.predict(df)
         return df.assign(prediction=predictions)
 
 if __name__ == "__main__":
     from mlplatform.runner import dev_context
-    ctx = dev_context("template_prediction_dag.yaml")
+    ctx = dev_context("my_model/pipeline/predict.yaml")
     predictor = MyPredictor()
     predictor.context = ctx
     predictor.load_model()
-    result = predictor.predict_chunk(load_input_data())
+    result = predictor.predict(load_input_data())
     print(result)
 ```
 

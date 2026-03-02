@@ -16,3 +16,4 @@ example_model/artifacts
 **/dist/
 
 # *.csv
+artifacts/

@@ -1,4 +1,4 @@
-"""In-process invocation: load model, read data via framework, run predict_chunk."""
+"""In-process invocation: load model, read data via framework, run predict."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 class InProcessInvocation(InvocationStrategy):
     """Load model in the current process, ingest data from YAML-configured
-    source (CSV/Parquet/BigQuery), call predict_chunk, and write output.
+    source (CSV/Parquet/BigQuery), call predict, and write output.
     """
 
     def invoke(
@@ -29,7 +29,7 @@ class InProcessInvocation(InvocationStrategy):
         context.log.info("Model loaded: %s", context.model_name)
 
         data = load_prediction_input(model_cfg)
-        result = predictor.predict_chunk(data)
+        result = predictor.predict(data)
         write_prediction_output(result, model_cfg)
         context.log.info("In-process prediction complete: %d rows", len(result))
         return result

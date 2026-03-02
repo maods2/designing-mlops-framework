@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlplatform"
-version = "0.2.0"
+version = "0.3.0"
 description = "Production-ready MLOps framework with pluggable backends"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -18,9 +18,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+config = [
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "ruff>=0.1.0",
 ]
 bigquery = [
     "google-cloud-bigquery>=3.0",
@@ -35,3 +40,14 @@ mlplatform = "mlplatform.cli.main:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mlplatform*"]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"

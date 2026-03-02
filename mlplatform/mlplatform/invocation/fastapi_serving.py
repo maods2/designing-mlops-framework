@@ -1,4 +1,4 @@
-"""FastAPI serving invocation: expose predict_chunk as a REST endpoint."""
+"""FastAPI serving invocation: expose predict as a REST endpoint."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class FastAPIInvocation(InvocationStrategy):
-    """Start a FastAPI server exposing predict_chunk as POST /predict.
+    """Start a FastAPI server exposing predict as POST /predict.
 
     Request body: ``{"records": [{"col": val, ...}, ...]}``
     Response body: ``{"predictions": [{"col": val, "prediction": val}, ...]}``
@@ -53,7 +53,7 @@ class FastAPIInvocation(InvocationStrategy):
         async def predict(body: dict[str, Any]) -> dict[str, Any]:
             records = body.get("records", [])
             df = pd.DataFrame(records)
-            result = predictor.predict_chunk(df)
+            result = predictor.predict(df)
             return {"predictions": result.to_dict(orient="records")}
 
         uvicorn.run(app, host=self.host, port=self.port)

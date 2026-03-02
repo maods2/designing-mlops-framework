@@ -2,6 +2,7 @@
 log_level: DEBUG
 base_path: ./dev_artifacts
 profile: local
+env: local
 
 # BigQuery I/O (used when file paths are absent or by SparkBatch)
 prediction_dataset_name: my_dataset

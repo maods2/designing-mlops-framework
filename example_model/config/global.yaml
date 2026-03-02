@@ -1,5 +1,8 @@
 # Global config profile - baseline settings applied to all environments.
 # Load order: global is first, later profiles (dev, local, prod) override.
+# artifact_bucket and artifact_namespace use framework defaults (./artifacts, artifacts)
+# or are passed from orchestrator via CLI --base-path, --artifact-namespace.
 log_level: INFO
 base_path: ./artifacts
 profile: local
+env: local

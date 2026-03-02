@@ -10,6 +10,7 @@ from typing import Any
 
 from mlplatform.config.factory import ConfigLoaderFactory
 from mlplatform.config.schema import ModelConfig, TaskConfig, UnifiedPipelineConfig
+from mlplatform.core.artifact_path_builder import ArtifactPathBuilder
 from mlplatform.core.artifact_registry import ArtifactRegistry
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
@@ -99,6 +100,8 @@ def run_workflow(
     profile: str = "local",
     version: str | None = None,
     base_path: str | None = None,
+    artifact_namespace: str | None = None,
+    env: str | None = None,
     commit_hash: str | None = None,
     config_names: list[str] | None = None,
 ) -> dict[str, str]:
@@ -140,7 +143,11 @@ def run_workflow(
 
     results: dict[str, str] = {}
     for task_cfg in executable_tasks:
-        ctx = _build_context(pipeline, task_cfg, profile, version, base_path, commit_hash)
+        ctx = _build_context(
+            pipeline, task_cfg, profile, version, base_path, commit_hash,
+            artifact_namespace_override=artifact_namespace,
+            env_override=env,
+        )
         model_cfg = task_cfg.to_model_config()
         _log_framework_params(ctx, profile)
         try:
@@ -169,18 +176,47 @@ def _build_context(
     version: str,
     base_path: str | None,
     commit_hash: str | None = None,
+    artifact_namespace_override: str | None = None,
+    env_override: str | None = None,
 ) -> ExecutionContext:
     prof = get_profile(profile)
-    base = base_path or "./artifacts"
-    storage = prof.storage_factory(base)
-    tracker = prof.tracker_factory(base)
     model_name = task_cfg.model_name or task_cfg.task_id
+
+    # Resolve artifact path config: CLI/orchestrator args override config; framework defaults otherwise
+    effective_bucket = base_path or pipeline.artifact_bucket or pipeline.base_path or "./artifacts"
+    effective_namespace = artifact_namespace_override or pipeline.artifact_namespace or "artifacts"
+    effective_env = env_override or pipeline.env or "local"
+
+    builder = ArtifactPathBuilder(
+        env=effective_env,
+        artifact_bucket=effective_bucket,
+        artifact_namespace=effective_namespace,
+    )
+    # Artifacts are always stored under the training path; prediction loads from there
+    paths = builder.build_artifact_paths(
+        feature_name=pipeline.feature_name,
+        model_name=model_name,
+        version=version,
+        pipeline_type="training",
+    )
+    storage_base = paths.storage_base_path
+    metrics_path = paths.metrics_path
+    registry_kwargs = {
+        "storage_base_path": paths.storage_base_path,
+        "artifact_path": paths.artifact_path,
+        "model_artifact_dir": paths.model_artifact_dir,
+        "metrics_artifact_dir": paths.metrics_artifact_dir,
+    }
+
+    storage = prof.storage_factory(storage_base)
+    tracker = prof.tracker_factory(storage_base, metrics_path=metrics_path)
     log = get_logger(f"mlplatform.{model_name}", pipeline.log_level)
     registry = ArtifactRegistry(
         storage=storage,
         feature_name=pipeline.feature_name,
         model_name=model_name,
         version=version,
+        **registry_kwargs,
     )
     return ExecutionContext(
         artifacts=registry,

@@ -94,15 +94,24 @@ class SparkBatchInvocation(InvocationStrategy):
         predictor_module = type(predictor).__module__
         predictor_class_name = type(predictor).__name__
 
+        storage_base = (
+            str(context.storage.base_path)
+            if hasattr(context.storage, "base_path")
+            else "./artifacts"
+        )
         ctx_kwargs = {
             "feature_name": context.feature_name,
             "model_name": context.model_name,
             "version": context.version,
             "optional_configs": context.optional_configs,
             "pipeline_type": context._pipeline_type,
-            "storage_base": context.storage.base_path
-            if hasattr(context.storage, "base_path")
-            else "./artifacts",
+            "storage_base": storage_base,
+            "storage_base_path": (
+                context.artifacts._storage_base_path
+                if hasattr(context.artifacts, "_storage_base_path")
+                and context.artifacts._storage_base_path is not None
+                else None
+            ),
         }
 
         def predict_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
@@ -118,11 +127,15 @@ class SparkBatchInvocation(InvocationStrategy):
 
             base = ctx_kwargs["storage_base"]
             storage = LocalFileSystem(base_path=base)
+            registry_kwargs: dict[str, Any] = {}
+            if ctx_kwargs.get("storage_base_path"):
+                registry_kwargs["storage_base_path"] = ctx_kwargs["storage_base_path"]
             registry = ArtifactRegistry(
                 storage=storage,
                 feature_name=ctx_kwargs["feature_name"],
                 model_name=ctx_kwargs["model_name"],
                 version=ctx_kwargs["version"],
+                **registry_kwargs,
             )
             worker_ctx = Ctx(
                 artifacts=registry,

@@ -36,15 +36,13 @@ class MyTrainer(BaseTrainer):
         ctx = self.context
 
         # 1. Load data (CSV path from config or default)
-        data_path = ctx.optional_configs.get(
-            "train_data_path"
-        )
+        data_path = ctx.config.get("train_data_path")
         df = pd.read_csv(data_path)
         X = df[cons.FEATURE_COLUMNS]
         y = df["target"]
 
         # 2. Split and scale
-        test_size = ctx.optional_configs.get("test_size", 0.2)
+        test_size = ctx.config.get("test_size", 0.2)
         X_train, X_val, y_train, y_val = train_test_split(
             X, y, test_size=test_size, random_state=42,
         )
@@ -52,8 +50,7 @@ class MyTrainer(BaseTrainer):
         X_train_scaled = scaler.fit_transform(X_train)
 
         # 3. Train model (change hyperparameters here if needed)
-        hyperparams = ctx.optional_configs.get("hyperparameters", {})
-        max_iter = hyperparams.get("max_iter", 1000)
+        max_iter = ctx.config.get("hyperparameters.max_iter", 1000)
         model = LogisticRegression(max_iter=max_iter, random_state=42)
         model.fit(X_train_scaled, y_train)
 

@@ -19,7 +19,15 @@ def main() -> None:
         help="Profile name (local, local-spark, cloud-train, cloud-online, cloud-batch, cloud-batch-emulated)",
     )
     run_parser.add_argument("--version", help="Model version (default: auto-generated)")
-    run_parser.add_argument("--base-path", help="Artifact storage base path (default: ./artifacts)")
+    run_parser.add_argument(
+        "--base-path",
+        help="Artifact bucket/base path (default: ./artifacts). Pass from orchestrator to override.",
+    )
+    run_parser.add_argument(
+        "--artifact-namespace",
+        help="Artifact namespace under bucket (default: artifacts). Pass from orchestrator to override.",
+    )
+    run_parser.add_argument("--env", help="Target environment (local, dev, qa, prod)")
     run_parser.add_argument("--commit-hash", help="Git commit hash to track the code version used for this run")
     run_parser.add_argument(
         "--config",
@@ -47,6 +55,8 @@ def main() -> None:
             profile=args.profile,
             version=args.version,
             base_path=args.base_path,
+            artifact_namespace=args.artifact_namespace,
+            env=args.env,
             commit_hash=args.commit_hash,
             config_names=config_names,
         )

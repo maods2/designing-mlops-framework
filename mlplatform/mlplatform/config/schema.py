@@ -70,6 +70,10 @@ class UnifiedPipelineConfig:
     tasks: list[TaskConfig] = field(default_factory=list)
     log_level: str = "INFO"
     config_profiles: list[str] = field(default_factory=list)
+    base_path: str | None = None
+    artifact_bucket: str | None = None
+    artifact_namespace: str = "artifacts"
+    env: str = "local"
 
 
 @dataclass

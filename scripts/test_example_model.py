@@ -39,7 +39,9 @@ def test_run_training_workflow():
     trainer.context = ctx
     trainer.train()
 
-    model_path = artifacts_dir / pipeline.feature_name / task_cfg.model_name / "test_v1" / "model.pkl"
+    # Standardized path: {base}/artifacts/{feature}/{model_train_version}/model/{artifact}
+    model_train_version = f"{pipeline.feature_name}_{task_cfg.model_name}_train_test_v1"
+    model_path = artifacts_dir / "artifacts" / pipeline.feature_name / model_train_version / "model" / "model.pkl"
     assert model_path.exists(), f"Model artifact not found at {model_path}"
     print("PASS test_run_training_workflow")
 

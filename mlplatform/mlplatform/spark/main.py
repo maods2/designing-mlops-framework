@@ -72,19 +72,38 @@ def _build_context_from_config(config: dict[str, Any]):
 
     runtime = config.get("runtime_config", {})
     env_meta = config.get("environment_metadata", {})
-    base_path = env_meta.get("base_path", "./artifacts")
     profile_name = env_meta.get("profile", "local")
 
+    # Use standardized paths when serialized by config_serializer
+    storage_base = env_meta.get("storage_base_path")
+    if storage_base is None:
+        storage_base = env_meta.get("base_path", "./artifacts")
+    metrics_path = env_meta.get("metrics_path")
+
     prof = get_profile(profile_name)
-    storage = prof.storage_factory(base_path)
-    tracker = prof.tracker_factory(base_path)
+    storage = prof.storage_factory(storage_base)
+    tracker = prof.tracker_factory(storage_base, metrics_path=metrics_path)
 
     feature = runtime.get("feature_name", "default")
     model = runtime.get("model_name", "default")
     ver = runtime.get("version", "dev")
 
+    artifact_paths = runtime.get("artifact_paths", {})
+    registry_kwargs: dict[str, Any] = {}
+    if artifact_paths:
+        registry_kwargs = {
+            "storage_base_path": artifact_paths.get("storage_base_path"),
+            "artifact_path": artifact_paths.get("artifact_path"),
+            "model_artifact_dir": artifact_paths.get("model_artifact_dir"),
+            "metrics_artifact_dir": artifact_paths.get("metrics_artifact_dir"),
+        }
+
     registry = ArtifactRegistry(
-        storage=storage, feature_name=feature, model_name=model, version=ver,
+        storage=storage,
+        feature_name=feature,
+        model_name=model,
+        version=ver,
+        **registry_kwargs,
     )
     return ExecutionContext(
         artifacts=registry,

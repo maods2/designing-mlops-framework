@@ -13,6 +13,44 @@ if TYPE_CHECKING:
 from mlplatform.core.artifact_registry import ArtifactRegistry
 
 
+def _get_by_dotted_key(d: dict[str, Any], key: str, default: Any) -> Any:
+    """Look up a value by key, supporting dot-notation for nested keys."""
+    parts = key.split(".")
+    current: Any = d
+    for part in parts:
+        if not isinstance(current, dict):
+            return default
+        if part not in current:
+            return default
+        current = current[part]
+    return current
+
+
+class ConfigView:
+    """Dict-like view over optional_configs with dot-notation support for nested keys."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get config value by key. Supports dot-notation for nested keys (e.g. 'hyperparameters.max_iter')."""
+        return _get_by_dotted_key(self._data, key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        """Direct access by key. Supports dot-notation. Raises KeyError if missing."""
+        value = _get_by_dotted_key(self._data, key, _MISSING)
+        if value is _MISSING:
+            raise KeyError(key)
+        return value
+
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists. Supports dot-notation."""
+        return _get_by_dotted_key(self._data, key, _MISSING) is not _MISSING
+
+
+_MISSING = object()
+
+
 @dataclass
 class ExecutionContext:
     """Context injected into trainer/predictor instances.
@@ -31,6 +69,11 @@ class ExecutionContext:
     log: logging.Logger = field(default_factory=lambda: logging.getLogger("mlplatform"))
     _pipeline_type: str = ""
     commit_hash: str | None = None
+
+    @property
+    def config(self) -> ConfigView:
+        """Flat config view with dot-notation support. Use ctx.config.get('key') or ctx.config['key']."""
+        return ConfigView(self.optional_configs)
 
     @property
     def storage(self) -> Storage:

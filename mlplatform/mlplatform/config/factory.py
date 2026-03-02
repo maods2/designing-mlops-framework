@@ -260,6 +260,10 @@ class PipelineConfigLoader:
             tasks=resolved_tasks,
             log_level=base_effective.get("log_level", "INFO"),
             config_profiles=all_config_profiles,
+            base_path=base_effective.get("base_path"),
+            artifact_bucket=base_effective.get("artifact_bucket"),
+            artifact_namespace=base_effective.get("artifact_namespace", "artifacts"),
+            env=base_effective.get("env", "local"),
         )
 
 

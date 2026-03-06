@@ -18,20 +18,39 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ── subpackage extras (install only what you need) ──────────────────────────
+utils = [
+    # save_plot requires matplotlib (plotly is optional and not listed here)
+    "matplotlib>=3.5",
+]
+storage = [
+    # GCSStorage backend
+    "google-cloud-storage>=2.0",
+]
+tracking = [
+    # VertexAITracker backend
+    "google-cloud-aiplatform>=1.0",
+]
+spark = [
+    "pyspark>=3.0",
+]
+# ── legacy / compatibility extras ────────────────────────────────────────────
 config = [
     "pyyaml>=6.0",
     "pydantic>=2.0",
-]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "ruff>=0.1.0",
 ]
 bigquery = [
     "google-cloud-bigquery>=3.0",
 ]
 parquet = [
     "pyarrow>=10.0",
+]
+# ── development ───────────────────────────────────────────────────────────────
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+    "matplotlib>=3.5",  # needed to run utils tests
 ]
 
 [project.scripts]

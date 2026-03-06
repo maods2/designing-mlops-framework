@@ -1,46 +1,71 @@
 # mlplatform
 
-MLOps framework for training and batch prediction pipelines. Supports local execution and cloud deployment (Dataproc/VertexAI via PySpark).
+MLOps platform for training and batch prediction pipelines. Supports local execution and cloud deployment (Dataproc/VertexAI via PySpark).
 
-## First-Time Environment Setup
+## Installation
 
-### 1. Python
+Requires **Python 3.8+**.
 
-Requires **Python 3.8+**. Verify your version:
-
-```bash
-python3 --version
-```
-
-### 2. Install framework dependencies
-
-From the repository root:
+The platform is organized into independently installable sub-packages. Install only what you need:
 
 ```bash
-pip install -r mlplatform/requirements.txt
+# Serialisation helpers + GCS artifact upload + matplotlib plots
+pip install mlplatform[utils]
+
+# Pydantic-validated config schemas + YAML pipeline loading
+pip install mlplatform[config]
+
+# Both of the above (full v0.1.x public API)
+pip install mlplatform[core]
 ```
 
-This installs the core framework dependencies (pyyaml, pandas, scikit-learn, joblib, etc.).
+For development (includes pytest, ruff, and all public-API deps):
 
-### 3. Install model dependencies
+```bash
+pip install mlplatform[dev]
+```
 
-Each model has its own `requirements.txt`. For the included example model:
+### Available extras
+
+| Extra | What it installs | When to use |
+|---|---|---|
+| `mlplatform[utils]` | matplotlib, google-cloud-storage | Saving plots/HTML to GCS; sanitising data for logging |
+| `mlplatform[config]` | pydantic | Loading and validating pipeline YAML configs |
+| `mlplatform[core]` | both of the above | Full v0.1.x public API in one command |
+| `mlplatform[dev]` | pytest, ruff, pydantic, matplotlib | Contributing / running tests locally |
+| `mlplatform[spark]` | pyspark | *(future)* Distributed batch prediction |
+| `mlplatform[tracking]` | google-cloud-aiplatform | *(future)* Vertex AI experiment tracking |
+| `mlplatform[serving]` | fastapi, uvicorn | *(future)* REST inference serving |
+| `mlplatform[bigquery]` | google-cloud-bigquery | Reading/writing BigQuery tables |
+| `mlplatform[parquet]` | pyarrow | Parquet file I/O |
+
+### Versioning and releases
+
+The package version is declared in `mlplatform/_version.py`. To cut a release:
+
+```bash
+# 1. Update _version.py
+#    __version__ = "0.2.0"
+
+# 2. Commit and push a tag — GitHub Actions does the rest
+git commit -am "chore: bump version to 0.2.0"
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The release workflow (`.github/workflows/release.yml`) verifies the tag matches the
+version file, runs the full test matrix, builds the distribution, and publishes to
+JFrog Artifactory.
+
+### Install model dependencies
+
+Each model package has its own `requirements.txt`. For the included example model:
 
 ```bash
 pip install -r example_model/requirements.txt
 ```
 
-### 4. (Optional) PySpark for distributed batch prediction
-
-Only needed if you want to run PySpark-based batch prediction locally:
-
-```bash
-pip install pyspark pyarrow
-```
-
-### 5. Verify the setup
-
-Run the example model training to confirm everything works:
+### Verify the setup
 
 ```bash
 python3 example_model/train.py
@@ -78,11 +103,16 @@ my_project/
       predict.yaml
   mlplatform/                     # Framework package
     mlplatform/
-      config/                     # Generic step config templates + loader + schema
-        train.yaml
-        inference.yaml
+      _version.py                 # Single source of truth for package version
+      config/                     # Pydantic config models + YAML loader + schema
+        models.py                 # TrainingConfig, PredictionConfig, PipelineConfig
         loader.py
         schema.py
+      utils/                      # Reusable utility helpers
+        serialization.py          # sanitize(), to_serializable()
+        storage_helpers.py        # save_plot(), save_html()
+      storage/                    # Storage backends (local, GCS)
+      tracking/                   # Experiment tracking backends
       schema.py                   # PredictionInputSchema
     pyproject.toml
   tests/                          # pytest test suite
@@ -90,9 +120,159 @@ my_project/
     integration/
     e2e/
   .github/workflows/
-    ci.yml                        # CI (lint + tests)
-    cd.yml                        # CD scaffold (disabled)
+    ci.yml                        # CI (lint + tests on every PR)
+    release.yml                   # CD: tag-triggered build + publish to JFrog
 ```
+
+## v0.1.x Public API
+
+The initial release exposes two sub-packages. Everything else exists in the codebase but is not part of the supported public API yet.
+
+### `mlplatform.utils` — Utility helpers
+
+```bash
+pip install mlplatform[utils]
+```
+
+#### Serialisation
+
+```python
+from mlplatform.utils import sanitize, to_serializable
+
+# Coerce numpy/pandas types, NaN, Inf, and datetimes to JSON-safe Python types
+metrics = {"loss": float("nan"), "acc": 0.95, "epoch": np.int64(10)}
+clean = sanitize(metrics)
+# → {"loss": None, "acc": 0.95, "epoch": 10}
+
+# Convert dataclasses, Pydantic models, or plain objects to dicts
+@dataclasses.dataclass
+class Metrics:
+    accuracy: float
+    loss: float
+
+plain = to_serializable(Metrics(0.95, float("nan")))
+# → {"accuracy": 0.95, "loss": nan}
+
+# Compose both for fully JSON-ready output
+result = sanitize(to_serializable(Metrics(0.95, float("nan"))))
+# → {"accuracy": 0.95, "loss": None}
+```
+
+#### Saving plots and HTML reports to storage
+
+```python
+import matplotlib.pyplot as plt
+from mlplatform.storage.local import LocalFileSystem
+from mlplatform.utils import save_plot, save_html
+
+storage = LocalFileSystem("./artifacts")
+
+# Save a matplotlib (or plotly) figure
+fig, ax = plt.subplots()
+ax.plot(history["loss"])
+save_plot(fig, "reports/loss_curve.png", storage)
+plt.close(fig)
+
+# Retrieve later
+png_bytes = storage.load("reports/loss_curve.png")
+
+# Save an HTML report (e.g. from pandas-profiling or ydata-profiling)
+save_html(report.to_html(), "reports/summary.html", storage)
+html_bytes = storage.load("reports/summary.html")
+```
+
+Both functions accept any object implementing the `Storage` interface — swap
+`LocalFileSystem` for `GCSStorage` and no other code changes are needed.
+
+---
+
+### `mlplatform.config` — Pipeline configuration models
+
+```bash
+pip install mlplatform[config]
+```
+
+#### Creating configs directly
+
+```python
+from mlplatform.config import TrainingConfig, PredictionConfig
+
+train = TrainingConfig(
+    model_name="churn_model",
+    module="churn.train",
+    feature_name="churn",
+    model_version="1.0",
+    platform="VertexAI",
+    optional_configs={"learning_rate": 0.01},
+)
+
+print(train.artifact_base_path)   # "churn/churn_model/1.0"
+print(train.is_cloud_training)    # True
+
+pred = PredictionConfig(
+    model_name="churn_model",
+    module="churn.predict",
+    feature_name="churn",
+    prediction_dataset_name="my_project",
+    prediction_table_name="customers",
+    prediction_output_dataset_table="my_project.predictions",
+)
+
+print(pred.input_source)          # "bigquery"
+print(pred.bigquery_table_ref)    # "my_project.customers"
+print(pred.has_output_table)      # True
+```
+
+#### Loading from a YAML pipeline file
+
+```python
+from mlplatform.config import PipelineConfig
+
+pipeline = PipelineConfig.from_yaml("my_model/pipeline/train.yaml")
+
+print(pipeline.workflow_name)   # "my_workflow"
+print(pipeline.is_training)     # True
+print(pipeline.model_count)     # 1
+
+model = pipeline.models[0]      # TrainingConfig or PredictionConfig
+print(model.artifact_base_path) # "churn/churn_model/latest"
+```
+
+Override config profiles at load time:
+
+```python
+pipeline = PipelineConfig.from_yaml(
+    "my_model/pipeline/train.yaml",
+    config_names=["global", "prod"],   # override the YAML's config: key
+)
+```
+
+#### Computed fields reference
+
+**`TrainingConfig`**
+
+| Field | Type | Description |
+|---|---|---|
+| `artifact_base_path` | `str \| None` | `"{feature}/{model}/{version}"` — `None` if `feature_name` not set |
+| `is_cloud_training` | `bool` | `True` when `platform` is not `local` or `local-spark` |
+
+**`PredictionConfig`**
+
+| Field | Type | Description |
+|---|---|---|
+| `input_source` | `str` | `"bigquery"` / `"gcs"` / `"local"` — detected from provided fields |
+| `bigquery_table_ref` | `str \| None` | `"{dataset}.{table}"` when both are provided |
+| `has_output_table` | `bool` | `True` when `prediction_output_dataset_table` is set |
+| `is_cloud_prediction` | `bool` | `True` when `platform` is not `local` or `local-spark` |
+| `artifact_base_path` | `str \| None` | Same as `TrainingConfig` |
+
+**`PipelineConfig`**
+
+| Field | Type | Description |
+|---|---|---|
+| `is_training` | `bool` | `True` when `pipeline_type == "training"` |
+| `is_prediction` | `bool` | `True` when `pipeline_type == "prediction"` |
+| `model_count` | `int` | Number of model configs in `models` |
 
 ## DAG Configuration
 
@@ -546,8 +726,9 @@ This runs:
 
 ## Extending the Framework
 
-- **New storage backends** (e.g., GCS): implement `Storage` ABC in `mlplatform/storage/`
-- **New artifact stores** (e.g., MLflow): implement `ArtifactStore` ABC in `mlplatform/artifacts/`
-- **New experiment trackers** (e.g., Weights & Biases): implement `ExperimentTracker` ABC in `mlplatform/tracking/`
-- **Shared utilities**: add reusable functions to `mlplatform/utils/` for cross-model use
+- **New storage backends**: implement the `Storage` ABC in `mlplatform/storage/` (see `local.py` and `gcs.py` as reference)
+- **New experiment trackers**: implement the `ExperimentTracker` ABC in `mlplatform/tracking/`
+- **Shared utilities**: add reusable helpers to `mlplatform/utils/` and expose them in `utils/__init__.py`
+- **New config computed fields**: add `@computed_field` properties to `TrainingConfig`, `PredictionConfig`, or `PipelineConfig` in `mlplatform/config/models.py`
 - **New cloud profiles**: extend the `_create_infra()` factory in `mlplatform/runner.py`
+- **New public sub-packages**: add a new extra to `pyproject.toml` and expose it in the top-level `mlplatform/__init__.py`

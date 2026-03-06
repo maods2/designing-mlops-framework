@@ -4,40 +4,46 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlplatform"
-version = "0.3.0"
-description = "Production-ready MLOps framework with pluggable backends"
+dynamic = ["version"]
+description = "Production-ready MLOps platform with pluggable backends"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "pyyaml>=6.0",
-    "scikit-learn>=1.0",
     "pandas>=1.0",
-    "fastapi>=0.100",
-    "uvicorn>=0.22",
     "joblib>=1.0",
 ]
 
 [project.optional-dependencies]
-# ── subpackage extras (install only what you need) ──────────────────────────
+# ── v0.1.x public API ────────────────────────────────────────────────────────
+# Install only what you need today; add more extras as the platform grows.
 utils = [
-    # save_plot requires matplotlib (plotly is optional and not listed here)
+    # Serialisation helpers (sanitize, to_serializable) have no extra deps.
+    # Storage helpers (save_plot, save_html) need matplotlib + GCS client.
     "matplotlib>=3.5",
-]
-storage = [
-    # GCSStorage backend
     "google-cloud-storage>=2.0",
 ]
+config = [
+    # Pydantic v2 is required for TrainingConfig / PredictionConfig / PipelineConfig.
+    "pydantic>=2.0",
+]
+# ── meta-extra: installs everything in the current public API ─────────────────
+core = [
+    "matplotlib>=3.5",
+    "google-cloud-storage>=2.0",
+    "pydantic>=2.0",
+]
+# ── future extras (not yet part of the public API) ───────────────────────────
+orchestration = []   # placeholder — will be populated in a future release
 tracking = [
-    # VertexAITracker backend
     "google-cloud-aiplatform>=1.0",
 ]
 spark = [
     "pyspark>=3.0",
 ]
-# ── legacy / compatibility extras ────────────────────────────────────────────
-config = [
-    "pyyaml>=6.0",
-    "pydantic>=2.0",
+serving = [
+    "fastapi>=0.100",
+    "uvicorn>=0.22",
 ]
 bigquery = [
     "google-cloud-bigquery>=3.0",
@@ -50,11 +56,15 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
-    "matplotlib>=3.5",  # needed to run utils tests
+    "pydantic>=2.0",
+    "matplotlib>=3.5",
 ]
 
 [project.scripts]
 mlplatform = "mlplatform.cli.main:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "mlplatform._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -54,10 +54,13 @@ def get_schema_from_predictor(predictor: Any) -> PredictionInputSchema | None:
     module_name = predictor_cls.__module__
 
     # 1. Check for explicit INPUT_SCHEMA in predictor module
-    mod = importlib.import_module(module_name)
-    schema = getattr(mod, "INPUT_SCHEMA", None)
-    if isinstance(schema, PredictionInputSchema):
-        return schema
+    try:
+        mod = importlib.import_module(module_name)
+        schema = getattr(mod, "INPUT_SCHEMA", None)
+        if isinstance(schema, PredictionInputSchema):
+            return schema
+    except ImportError:
+        pass
 
     # 2. Try constants module (e.g. example_model.constants from example_model.predict)
     parts = module_name.split(".")

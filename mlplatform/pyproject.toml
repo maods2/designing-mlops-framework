@@ -16,7 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # ── v0.1.x public API ────────────────────────────────────────────────────────
-# Install only what you need today; add more extras as the platform grows.
+# Atomic extras: install only the deps each sub-package actually needs.
 utils = [
     # Serialisation helpers (sanitize, to_serializable) have no extra deps.
     # Storage helpers (save_plot, save_html) need matplotlib + GCS client.
@@ -27,19 +27,19 @@ config = [
     # Pydantic v2 is required for TrainingConfig / PredictionConfig / PipelineConfig.
     "pydantic>=2.0",
 ]
-# ── meta-extra: installs everything in the current public API ─────────────────
+
+# Meta-extras: compose from atomic extras above — no version pins are repeated.
 core = [
-    "matplotlib>=3.5",
-    "google-cloud-storage>=2.0",
-    "pydantic>=2.0",
+    "mlplatform[utils,config]",
 ]
+
 # ── future extras (not yet part of the public API) ───────────────────────────
-orchestration = []   # placeholder — will be populated in a future release
 tracking = [
     "google-cloud-aiplatform>=1.0",
 ]
 spark = [
     "pyspark>=3.0",
+    "pyarrow>=10.0",       # required by mapInPandas and Spark <-> pandas interchange
 ]
 serving = [
     "fastapi>=0.100",
@@ -47,17 +47,23 @@ serving = [
 ]
 bigquery = [
     "google-cloud-bigquery>=3.0",
+    "pyarrow>=10.0",       # required by the BigQuery Storage Read API
 ]
 parquet = [
     "pyarrow>=10.0",
 ]
+
+# Meta-extra: everything — useful for CI and integration test environments.
+all = [
+    "mlplatform[core,tracking,spark,serving,bigquery]",
+]
+
 # ── development ───────────────────────────────────────────────────────────────
 dev = [
+    "mlplatform[core]",    # includes all public-API deps; no version pins repeated
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
-    "pydantic>=2.0",
-    "matplotlib>=3.5",
 ]
 
 [project.scripts]

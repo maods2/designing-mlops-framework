@@ -17,3 +17,6 @@ example_model/artifacts
 
 # *.csv
 artifacts/
+
+# Generated output from examples/
+examples/output/

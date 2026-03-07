@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -10,78 +9,13 @@ from typing import Any
 
 from mlplatform.config.loader import load_workflow_config
 from mlplatform.config.schema import ModelConfig, WorkflowConfig
-from mlplatform.core.artifact_registry import ArtifactRegistry
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
 from mlplatform.core.trainer import BaseTrainer
 from mlplatform.invocation.base import InvocationStrategy
-from mlplatform.log import get_logger
-from mlplatform.profiles.registry import Profile, get_profile
-
-
-def dev_context(
-    dag_path: str | Path,
-    model_index: int = 0,
-    profile: str = "local",
-    version: str = "dev",
-    base_path: str | None = None,
-    commit_hash: str | None = None,
-    config_names: list[str] | None = None,
-) -> ExecutionContext:
-    """Build an ExecutionContext for local development and debugging.
-
-    Call this from a trainer/predictor's ``if __name__ == "__main__"`` block
-    so you can run/debug the file directly::
-
-        if __name__ == "__main__":
-            from mlplatform.runner import dev_context
-            ctx = dev_context("example_model/pipeline/train.yaml")
-            trainer = MyTrainer()
-            trainer.context = ctx
-            trainer.train()
-    """
-    workflow = load_workflow_config(dag_path, config_names=config_names)
-    model_cfg = workflow.models[model_index]
-    return _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
-
-
-def dev_predict(
-    dag_path: str | Path,
-    data: Any = None,
-    model_index: int = 0,
-    profile: str = "local",
-    version: str = "dev",
-    base_path: str | None = None,
-    config_names: list[str] | None = None,
-) -> Any:
-    """Run prediction locally for development and debugging.
-
-    When *data* is provided (a DataFrame), the framework I/O is skipped and
-    ``predict`` is called directly.  When *data* is ``None``, the
-    profile's ``InvocationStrategy`` handles data loading from the
-    YAML-configured source.
-
-    Switch between in-process and PySpark by passing *profile*:
-    ``"local"`` (in-process) or ``"local-spark"`` (PySpark mapInPandas).
-    """
-    workflow = load_workflow_config(dag_path, config_names=config_names)
-    model_cfg = workflow.models[model_index]
-    ctx = _build_context(workflow, model_cfg, profile, version, base_path)
-
-    predictor_cls = _resolve_class(model_cfg.module, BasePredictor)
-    predictor = predictor_cls()
-    predictor.context = ctx
-    predictor.load_model()
-    ctx.log.info("Model loaded: %s", model_cfg.model_name)
-
-    if data is not None:
-        result = predictor.predict(data)
-        ctx.log.info("Dev prediction complete (manual data): %d rows", len(result))
-        return result
-
-    prof = get_profile(profile)
-    invocation = prof.invocation_strategy_factory()
-    return invocation.invoke(predictor, ctx, model_cfg)
+from mlplatform.profiles.registry import get_profile
+from mlplatform.runner.resolve import resolve_class
+from mlplatform.utils.logging import get_logger
 
 
 def run_workflow(
@@ -146,25 +80,15 @@ def _build_context(
     commit_hash: str | None = None,
 ) -> ExecutionContext:
     prof = get_profile(profile)
-    base = base_path or "./artifacts"
-    storage = prof.storage_factory(base)
-    tracker = prof.tracker_factory(base)
-    log = get_logger(f"mlplatform.{model_cfg.model_name}", workflow.log_level)
-    registry = ArtifactRegistry(
-        storage=storage,
+    return ExecutionContext.from_profile(
+        profile=prof,
         feature_name=workflow.feature_name,
         model_name=model_cfg.model_name,
         version=version,
-    )
-    return ExecutionContext(
-        artifacts=registry,
-        experiment_tracker=tracker,
-        feature_name=workflow.feature_name,
-        model_name=model_cfg.model_name,
-        version=version,
+        base_path=base_path or "./artifacts",
+        pipeline_type=workflow.pipeline_type,
+        log_level=workflow.log_level,
         optional_configs=model_cfg.optional_configs,
-        log=log,
-        _pipeline_type=workflow.pipeline_type,
         commit_hash=commit_hash,
     )
 
@@ -181,23 +105,17 @@ def _log_framework_params(ctx: ExecutionContext, profile: str) -> None:
     ctx.log_params(params)
 
 
-def _resolve_class(module_path: str, base_class: type) -> type:
-    """Import a module and find the first subclass of base_class."""
-    mod = importlib.import_module(module_path)
-    for attr_name in dir(mod):
-        attr = getattr(mod, attr_name)
-        if isinstance(attr, type) and issubclass(attr, base_class) and attr is not base_class:
-            return attr
-    raise ImportError(f"No {base_class.__name__} subclass found in {module_path}")
-
-
 def _run_training(model_cfg: ModelConfig, ctx: ExecutionContext) -> None:
-    trainer_cls = _resolve_class(model_cfg.module, BaseTrainer)
+    trainer_cls = resolve_class(model_cfg.module, BaseTrainer)
     trainer = trainer_cls()
     trainer.context = ctx
+    trainer.setup()
     ctx.log.info("Starting training: %s", model_cfg.model_name)
-    trainer.train()
-    ctx.log.info("Training complete: %s", model_cfg.model_name)
+    try:
+        trainer.train()
+        ctx.log.info("Training complete: %s", model_cfg.model_name)
+    finally:
+        trainer.teardown()
 
 
 def _run_prediction(
@@ -205,7 +123,11 @@ def _run_prediction(
     ctx: ExecutionContext,
     invocation: InvocationStrategy,
 ) -> Any:
-    predictor_cls = _resolve_class(model_cfg.module, BasePredictor)
+    predictor_cls = resolve_class(model_cfg.module, BasePredictor)
     predictor = predictor_cls()
     predictor.context = ctx
-    return invocation.invoke(predictor, ctx, model_cfg)
+    predictor.setup()
+    try:
+        return invocation.invoke(predictor, ctx, model_cfg)
+    finally:
+        predictor.teardown()

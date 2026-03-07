@@ -1,17 +1,5 @@
-"""Framework logging with configurable log levels."""
+"""Backward-compatible shim — logging has moved to mlplatform.utils.logging."""
 
-from __future__ import annotations
+from mlplatform.utils.logging import get_logger  # noqa: F401
 
-import logging
-
-
-def get_logger(name: str = "mlplatform", level: str = "INFO") -> logging.Logger:
-    """Return a configured logger. Reuses existing handlers to avoid duplication."""
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        handler.setFormatter(fmt)
-        logger.addHandler(handler)
-    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-    return logger
+__all__ = ["get_logger"]

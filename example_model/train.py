@@ -9,15 +9,6 @@ What you need to change:
   - Model and hyperparameters in the train() method below
 """
 
-import sys
-from pathlib import Path
-
-# Add repo root and mlplatform to path (needed for local runs)
-_repo_root = Path(__file__).resolve().parent.parent
-for _p in [str(_repo_root), str(_repo_root / "mlplatform")]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split

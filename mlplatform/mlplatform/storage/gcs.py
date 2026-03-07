@@ -55,3 +55,18 @@ class GCSStorage(Storage):
         blob.download_to_file(buf)
         buf.seek(0)
         return joblib.load(buf)
+
+    def exists(self, path: str) -> bool:
+        return self._bucket.blob(self._blob_path(path)).exists()
+
+    def list_artifacts(self, prefix: str = "") -> list[str]:
+        full_prefix = self._blob_path(prefix) if prefix else self._prefix
+        blobs = self._client.list_blobs(self._bucket, prefix=full_prefix)
+        base = f"{self._prefix}/" if self._prefix else ""
+        return [
+            blob.name[len(base):] if blob.name.startswith(base) else blob.name
+            for blob in blobs
+        ]
+
+    def delete(self, path: str) -> None:
+        self._bucket.blob(self._blob_path(path)).delete()

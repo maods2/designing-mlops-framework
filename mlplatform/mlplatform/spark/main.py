@@ -13,7 +13,6 @@ Path resolution:
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import sys
 from pathlib import Path
@@ -64,10 +63,8 @@ def _load_config(config_path: str) -> dict[str, Any]:
 
 
 def _build_context_from_config(config: dict[str, Any]):
-    """Build an ExecutionContext using the profile system."""
-    from mlplatform.core.artifact_registry import ArtifactRegistry
+    """Build an ExecutionContext using the centralized from_profile factory."""
     from mlplatform.core.context import ExecutionContext
-    from mlplatform.log import get_logger
     from mlplatform.profiles.registry import get_profile
 
     runtime = config.get("runtime_config", {})
@@ -76,25 +73,15 @@ def _build_context_from_config(config: dict[str, Any]):
     profile_name = env_meta.get("profile", "local")
 
     prof = get_profile(profile_name)
-    storage = prof.storage_factory(base_path)
-    tracker = prof.tracker_factory(base_path)
-
-    feature = runtime.get("feature_name", "default")
-    model = runtime.get("model_name", "default")
-    ver = runtime.get("version", "dev")
-
-    registry = ArtifactRegistry(
-        storage=storage, feature_name=feature, model_name=model, version=ver,
-    )
-    return ExecutionContext(
-        artifacts=registry,
-        experiment_tracker=tracker,
-        feature_name=feature,
-        model_name=model,
-        version=ver,
+    return ExecutionContext.from_profile(
+        profile=prof,
+        feature_name=runtime.get("feature_name", "default"),
+        model_name=runtime.get("model_name", "default"),
+        version=runtime.get("version", "dev"),
+        base_path=base_path,
+        pipeline_type=runtime.get("pipeline_type", ""),
+        log_level=env_meta.get("log_level", "INFO"),
         optional_configs=runtime.get("optional_configs", {}),
-        log=get_logger(f"mlplatform.spark.{model}"),
-        _pipeline_type=runtime.get("pipeline_type", ""),
         commit_hash=runtime.get("commit_hash"),
     )
 
@@ -124,17 +111,14 @@ def _build_model_cfg_from_config(
 
 
 def _resolve_class_from_config(config: dict[str, Any], base_class: type) -> type:
-    """Import the module from config and find the first subclass of base_class."""
+    """Import the module from config and resolve the target class."""
+    from mlplatform.runner.resolve import resolve_class
+
     runtime = config.get("runtime_config", {})
     module_path = runtime.get("module", "")
     if not module_path:
         raise ValueError("runtime_config must contain 'module'")
-    mod = importlib.import_module(module_path)
-    for attr_name in dir(mod):
-        attr = getattr(mod, attr_name)
-        if isinstance(attr, type) and issubclass(attr, base_class) and attr is not base_class:
-            return attr
-    raise ImportError(f"No {base_class.__name__} subclass found in {module_path}")
+    return resolve_class(module_path, base_class)
 
 
 def _log_framework_params(ctx: Any, config: dict[str, Any]) -> None:
@@ -169,13 +153,7 @@ def _run_spark_inference(
     input_path: str | None = None,
     output_path: str | None = None,
 ) -> None:
-    """Run distributed inference via SparkBatchInvocation.
-
-    Args:
-        config: Serialized runtime config dict.
-        input_path: Override input path from CLI (optional).
-        output_path: Override output path from CLI (optional).
-    """
+    """Run distributed inference via SparkBatchInvocation."""
     from mlplatform.core.predictor import BasePredictor
     from mlplatform.invocation.spark_batch import SparkBatchInvocation
 

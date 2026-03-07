@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mlplatform.data_io import load_prediction_input, write_prediction_output
+from mlplatform.core.prediction_schema import get_schema_from_predictor
+from mlplatform.data.io import load_prediction_input, write_prediction_output
 from mlplatform.invocation.base import InvocationStrategy
-from mlplatform.schema import get_schema_from_predictor
 
 if TYPE_CHECKING:
     from mlplatform.config.schema import ModelConfig

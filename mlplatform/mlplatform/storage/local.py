@@ -25,3 +25,21 @@ class LocalFileSystem(Storage):
     def load(self, path: str) -> Any:
         full_path = self._resolve_path(path)
         return joblib.load(full_path)
+
+    def exists(self, path: str) -> bool:
+        return self._resolve_path(path).exists()
+
+    def list_artifacts(self, prefix: str = "") -> list[str]:
+        base = self._resolve_path(prefix) if prefix else self.base_path
+        if not base.exists():
+            return []
+        return [
+            str(p.relative_to(self.base_path))
+            for p in base.rglob("*")
+            if p.is_file()
+        ]
+
+    def delete(self, path: str) -> None:
+        full_path = self._resolve_path(path)
+        if full_path.exists():
+            full_path.unlink()

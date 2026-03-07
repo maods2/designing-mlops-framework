@@ -33,10 +33,12 @@ Quick-start example::
     plain = to_serializable(my_metrics_object)
 """
 
+from mlplatform.utils.logging import get_logger
 from mlplatform.utils.serialization import sanitize, to_serializable
 from mlplatform.utils.storage_helpers import save_html, save_plot
 
 __all__ = [
+    "get_logger",
     "sanitize",
     "to_serializable",
     "save_plot",

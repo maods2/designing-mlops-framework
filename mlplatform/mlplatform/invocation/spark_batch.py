@@ -103,36 +103,28 @@ class SparkBatchInvocation(InvocationStrategy):
             "storage_base": context.storage.base_path
             if hasattr(context.storage, "base_path")
             else "./artifacts",
+            "profile": "local",  # TODO: serialize actual profile name from context
         }
 
         def predict_partition(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.DataFrame]:
-            from mlplatform.core.artifact_registry import ArtifactRegistry
             from mlplatform.core.context import ExecutionContext as Ctx
-            from mlplatform.log import get_logger
-            from mlplatform.schema import get_schema_from_predictor
-            from mlplatform.storage.local import LocalFileSystem
-            from mlplatform.tracking.none import NoneTracker
+            from mlplatform.core.prediction_schema import get_schema_from_predictor
+            from mlplatform.profiles.registry import get_profile
 
             mod = importlib.import_module(predictor_module)
             pred_cls = getattr(mod, predictor_class_name)
 
-            base = ctx_kwargs["storage_base"]
-            storage = LocalFileSystem(base_path=base)
-            registry = ArtifactRegistry(
-                storage=storage,
+            # Use the profile system to construct the worker context,
+            # rather than hard-coding LocalFileSystem + NoneTracker.
+            prof = get_profile(ctx_kwargs["profile"])
+            worker_ctx = Ctx.from_profile(
+                profile=prof,
                 feature_name=ctx_kwargs["feature_name"],
                 model_name=ctx_kwargs["model_name"],
                 version=ctx_kwargs["version"],
-            )
-            worker_ctx = Ctx(
-                artifacts=registry,
-                experiment_tracker=NoneTracker(),
-                feature_name=ctx_kwargs["feature_name"],
-                model_name=ctx_kwargs["model_name"],
-                version=ctx_kwargs["version"],
+                base_path=ctx_kwargs["storage_base"],
+                pipeline_type=ctx_kwargs["pipeline_type"],
                 optional_configs=ctx_kwargs["optional_configs"],
-                log=get_logger(f"mlplatform.spark.worker.{ctx_kwargs['model_name']}"),
-                _pipeline_type=ctx_kwargs["pipeline_type"],
             )
 
             pred = pred_cls()

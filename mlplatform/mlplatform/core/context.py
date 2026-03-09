@@ -63,8 +63,8 @@ class ExecutionContext:
         """
         from mlplatform.utils.logging import get_logger
 
-        storage = profile.storage_factory(base_path)
-        tracker = profile.tracker_factory(base_path)
+        storage = profile.storage_factory(base_path, profile.extra)
+        tracker = profile.tracker_factory(base_path, profile.extra)
         registry = ArtifactRegistry(
             storage=storage,
             feature_name=feature_name,

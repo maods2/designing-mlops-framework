@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-import tempfile
+import os
 from typing import Any
 
 import joblib
@@ -16,13 +16,27 @@ class GCSStorage(Storage):
 
     ``base_path`` should be a ``gs://bucket/prefix`` URI. Artifacts are
     stored as blobs under ``{base_path}/{path}`` using joblib serialization.
+
+    ``project`` is the GCP project ID.  Resolution order:
+
+    1. Explicit ``project`` argument.
+    2. ``GOOGLE_CLOUD_PROJECT`` environment variable.
+    3. ADC / metadata server (automatic on GCP — Vertex AI, Cloud Run, GCE).
+
+    Local setup (one-time):
+
+    .. code-block:: bash
+
+        gcloud auth application-default login
+        export GOOGLE_CLOUD_PROJECT=my-dev-project  # or add to .env
     """
 
-    def __init__(self, base_path: str) -> None:
+    def __init__(self, base_path: str, project: str | None = None) -> None:
         from google.cloud import storage as gcs
 
+        resolved_project = project or os.environ.get("GOOGLE_CLOUD_PROJECT")
         self.base_path = base_path.rstrip("/")
-        self._client = gcs.Client()
+        self._client = gcs.Client(project=resolved_project)
         bucket_name, self._prefix = self._parse_gs_uri(self.base_path)
         self._bucket = self._client.bucket(bucket_name)
 

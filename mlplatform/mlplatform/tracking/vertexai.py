@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from typing import Any
 
@@ -28,8 +29,9 @@ class VertexAITracker(ExperimentTracker):
     ) -> None:
         from google.cloud import aiplatform
 
+        resolved_project = project or os.environ.get("GOOGLE_CLOUD_PROJECT")
         aiplatform.init(
-            project=project,
+            project=resolved_project,
             location=location,
             experiment=experiment_name,
         )

@@ -1,11 +1,11 @@
-"""Unit tests for mlplatform.schema (PredictionInputSchema)."""
+"""Unit tests for mlplatform.core.prediction_schema (PredictionInputSchema)."""
 
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
-from mlplatform.schema import (
+from mlplatform.core.prediction_schema import (
     PredictionInputSchema,
     SchemaValidationError,
     from_feature_columns,

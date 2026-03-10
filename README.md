@@ -19,10 +19,23 @@ pip install mlplatform[config]
 pip install mlplatform[core]
 ```
 
-For development (includes pytest, ruff, and all public-API deps):
+For development (includes pytest, ruff, bump-my-version, and all public-API deps):
 
 ```bash
 pip install mlplatform[dev]
+```
+
+### Install from this repository
+
+```bash
+# Editable install (recommended for development)
+pip install -e "mlplatform/[core]"
+
+# If editable install fails (missing build_editable), use:
+pip install -e "mlplatform/[core]" --no-build-isolation
+
+# Full dev setup with version bumping
+pip install -e "mlplatform/[dev]"
 ```
 
 ### Available extras
@@ -32,25 +45,41 @@ pip install mlplatform[dev]
 | `mlplatform[utils]` | matplotlib, google-cloud-storage | Saving plots/HTML to GCS; sanitising data for logging |
 | `mlplatform[config]` | pydantic | Loading and validating pipeline YAML configs |
 | `mlplatform[core]` | both of the above | Full v0.1.x public API in one command |
-| `mlplatform[dev]` | pytest, ruff, pydantic, matplotlib | Contributing / running tests locally |
+| `mlplatform[dev]` | pytest, ruff, pydantic, matplotlib, bump-my-version | Contributing / running tests / version bumping |
 | `mlplatform[spark]` | pyspark | *(future)* Distributed batch prediction |
 | `mlplatform[tracking]` | google-cloud-aiplatform | *(future)* Vertex AI experiment tracking |
 | `mlplatform[serving]` | fastapi, uvicorn | *(future)* REST inference serving |
 | `mlplatform[bigquery]` | google-cloud-bigquery | Reading/writing BigQuery tables |
 | `mlplatform[parquet]` | pyarrow | Parquet file I/O |
 
+**Base dependencies** (always installed): `pyyaml`, `pandas`, `joblib`.
+
+**Optional extras** are used lazily: `google-cloud-storage` (GCS storage), `google-cloud-aiplatform` (Vertex AI tracking), `pyspark` (Spark batch inference), `fastapi` (REST serving), `google-cloud-bigquery` (BigQuery I/O). Install only the extras you need.
+
 ### Versioning and releases
 
-The package version is declared in `mlplatform/_version.py`. To cut a release:
+The package version is declared in `mlplatform/_version.py`. Use **bump-my-version**
+(installed with `mlplatform[dev]`) to bump, commit, and tag in one step:
 
 ```bash
-# 1. Update _version.py
-#    __version__ = "0.2.0"
+cd mlplatform
+bump-my-version bump patch   # 0.1.0 -> 0.1.1
+bump-my-version bump minor   # 0.1.1 -> 0.2.0
+bump-my-version bump major   # 0.2.0 -> 1.0.0
+```
 
-# 2. Commit and push a tag — GitHub Actions does the rest
-git commit -am "chore: bump version to 0.2.0"
-git tag v0.2.0
-git push origin v0.2.0
+This updates `_version.py`, commits, and creates the tag. Then push:
+
+```bash
+git push origin main
+git push origin v0.1.1
+```
+
+**Preview changes without committing:**
+
+```bash
+cd mlplatform
+bump-my-version bump patch --dry-run --allow-dirty
 ```
 
 The release workflow (`.github/workflows/release.yml`) verifies the tag matches the
@@ -72,6 +101,10 @@ python3 example_model/train.py
 ```
 
 You should see log output with an accuracy metric. Artifacts are written to `./artifacts/`.
+
+### Examples
+
+Standalone runnable examples are in `examples/` — config, artifacts, training, prediction, and experiment tracking. See [examples/README.md](examples/README.md).
 
 ### How imports work
 
@@ -112,8 +145,8 @@ my_project/
         serialization.py          # sanitize(), to_serializable()
         storage_helpers.py        # save_plot(), save_html()
       storage/                    # Storage backends (local, GCS)
+      inference/                  # Inference strategies (InProcess, SparkBatch, FastAPI)
       tracking/                   # Experiment tracking backends
-      schema.py                   # PredictionInputSchema
     pyproject.toml
   tests/                          # pytest test suite
     unit/
@@ -399,7 +432,7 @@ Use `PredictionInputSchema` to declare the expected input columns, dtypes, and r
 
 ```python
 # my_model/predict.py
-from mlplatform.schema import PredictionInputSchema
+from mlplatform.core.prediction_schema import PredictionInputSchema
 
 INPUT_SCHEMA = PredictionInputSchema(
     columns=[
@@ -471,11 +504,8 @@ class MyTrainer(BaseTrainer):
         ctx.log.info("Training complete")
 
 if __name__ == "__main__":
-    from mlplatform.runner import dev_context
-    ctx = dev_context("template_training_dag.yaml")
-    trainer = MyTrainer()
-    trainer.context = ctx
-    trainer.train()
+    from mlplatform.runner import dev_train
+    dev_train("template_training_dag.yaml")
 ```
 
 ### Predictor (prediction)
@@ -506,12 +536,8 @@ class MyPredictor(BasePredictor):
         return df.assign(prediction=predictions)
 
 if __name__ == "__main__":
-    from mlplatform.runner import dev_context
-    ctx = dev_context("my_model/pipeline/predict.yaml")
-    predictor = MyPredictor()
-    predictor.context = ctx
-    predictor.load_model()
-    result = predictor.predict(load_input_data())
+    from mlplatform.runner import dev_predict
+    result = dev_predict("my_model/pipeline/predict.yaml")
     print(result)
 ```
 
@@ -600,16 +626,19 @@ for _p in [str(_repo_root), str(_repo_root / "mlplatform")]:
         sys.path.insert(0, _p)
 ```
 
-**2. `__main__` block** at the bottom that uses `dev_context()`:
+**2. `__main__` block** at the bottom that uses `dev_train()` and `dev_predict()`:
 
 ```python
+# train.py
 if __name__ == "__main__":
-    from mlplatform.runner import dev_context
+    from mlplatform.runner import dev_train
+    dev_train("template_training_dag.yaml")
 
-    ctx = dev_context("template_training_dag.yaml")
-    trainer = MyTrainer()
-    trainer.context = ctx
-    trainer.train()
+# predict.py
+if __name__ == "__main__":
+    from mlplatform.runner import dev_predict
+    result = dev_predict("template_prediction_dag.yaml")
+    print(result)
 ```
 
 Then run or debug directly from the repo root:
@@ -619,9 +648,11 @@ python example_model/train.py
 python example_model/predict.py
 ```
 
-`dev_context()` reads your DAG YAML, builds a local `ExecutionContext` with version `"dev"`, and points artifacts at `./artifacts`. You get the full framework (logging, `save_artifact`, `load_artifact`, metrics tracking) without needing the CLI or an external orchestrator. Set breakpoints anywhere in your `train()` or `predict_chunk()` method and debug normally.
+`dev_train()` and `dev_predict()` read your DAG YAML, build a local `ExecutionContext` with version `"dev"`, and point artifacts at `./artifacts`. You get the full framework (logging, `save_artifact`, `load_artifact`, metrics tracking) without needing the CLI or an external orchestrator. Set breakpoints anywhere in your `train()` or `predict()` method and debug normally.
 
-Parameters: `dev_context(dag_path, model_index=0, profile="local", version="dev", base_path=None)`
+For advanced use (custom setup before train, tests), use `dev_context()` to get a raw `ExecutionContext`.
+
+Parameters: `dev_train(dag_path, model_index=0, profile="local", version="dev", base_path=None)` — same for `dev_predict`.
 
 ### Prediction must use the same version and base_path as training
 

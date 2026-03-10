@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mlplatform.core.artifact_registry import ArtifactRegistry
+    from mlplatform.core.context import ExecutionContext
+    from mlplatform.tracking.base import ExperimentTracker
 
 
 class BasePredictor(ABC):
@@ -13,12 +18,41 @@ class BasePredictor(ABC):
     - load_model(): load model artifacts (called before predict)
     - predict(data): run prediction on a chunk of data
 
+    Use typed properties for better discoverability:
+
+    - ``self.artifacts`` — load model artifacts (ArtifactRegistry)
+    - ``self.tracker`` — log params and metrics (ExperimentTracker)
+    - ``self.config`` — optional_configs dict
+    - ``self.log`` — Logger
+
     Lifecycle hooks
     ---------------
     Override :meth:`setup` and/or :meth:`teardown` for custom initialization
     or cleanup.  The framework calls these automatically when orchestrating
-    via ``run_workflow`` or invocation strategies.
+    via ``run_workflow`` or inference strategies.
     """
+
+    context: ExecutionContext
+
+    @property
+    def artifacts(self) -> ArtifactRegistry:
+        """Load model artifacts. Use artifacts.load(name)."""
+        return self.context.artifacts
+
+    @property
+    def tracker(self) -> ExperimentTracker:
+        """Log params and metrics. Use tracker.log_params(dict), tracker.log_metrics(dict)."""
+        return self.context.experiment_tracker
+
+    @property
+    def config(self) -> dict[str, Any]:
+        """Optional config from YAML (input_path, output_path, etc.)."""
+        return self.context.optional_configs
+
+    @property
+    def log(self) -> Any:
+        """Logger for this run."""
+        return self.context.log
 
     def setup(self) -> None:
         """Called before :meth:`load_model`. Override for custom initialization.

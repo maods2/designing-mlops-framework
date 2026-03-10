@@ -1,0 +1,34 @@
+# Prediction pipeline DAG - trend model v2.
+workflow_name: trend_workflow_prediction
+execution_mode: sequential
+pipeline_type: prediction
+feature_name: trend
+config_version: 2
+log_level: INFO
+
+resources:
+  jobs:
+    schedule:
+      dev: "0 0 6 ? * MON"
+      qa: "0 0 6 ? * MON"
+      prod: "0 0 6 ? * MON"
+
+    environments:
+      dev: true
+      qa: true
+      prod: false
+
+    tasks:
+      - task_key: "run_trend_prediction"
+        environment_key: default
+        model_name: trend_model_v2
+        serving_platform: VertexAI
+        module: "example_model_v2.predict"
+        model_version: "latest"
+
+        config:
+          - global
+          - predict-dev
+
+        input_path: "example_model_v2/data/sample_inference.csv"
+        output_path: "artifacts/predictions.csv"

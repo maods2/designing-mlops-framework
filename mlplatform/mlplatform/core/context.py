@@ -53,6 +53,7 @@ class ExecutionContext:
         log_level: str = "INFO",
         optional_configs: dict[str, Any] | None = None,
         commit_hash: str | None = None,
+        extra_overrides: dict[str, Any] | None = None,
     ) -> ExecutionContext:
         """Build an ``ExecutionContext`` from a resolved :class:`Profile`.
 
@@ -60,11 +61,16 @@ class ExecutionContext:
         orchestration code (runner, Spark entry point, Spark partition
         functions) should use this factory instead of duplicating the
         construction logic.
+
+        When *extra_overrides* is provided (e.g. by an orchestrator), its
+        values are merged into ``profile.extra`` before creating storage and
+        tracker. Use this to inject ``gcp_project``, ``bucket``, etc. at runtime.
         """
         from mlplatform.utils.logging import get_logger
 
-        storage = profile.storage_factory(base_path, profile.extra)
-        tracker = profile.tracker_factory(base_path, profile.extra)
+        merged_extra = {**profile.extra, **(extra_overrides or {})}
+        storage = profile.storage_factory(base_path, merged_extra)
+        tracker = profile.tracker_factory(base_path, merged_extra)
         registry = ArtifactRegistry(
             storage=storage,
             feature_name=feature_name,

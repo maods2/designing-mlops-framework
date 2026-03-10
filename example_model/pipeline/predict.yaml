@@ -31,6 +31,6 @@ resources:
           - global
           - predict-dev
 
-        # File-based I/O (used by InProcess and SparkBatch invocations)
+        # File-based I/O (used by InProcess and SparkBatch inference)
         input_path: "example_model/data/sample_inference.csv"
         output_path: "artifacts/predictions.csv"

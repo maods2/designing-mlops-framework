@@ -1,7 +1,7 @@
 """Profile definitions and registry.
 
 A Profile is a declarative infrastructure bundle that determines which Storage,
-ExperimentTracker, and InvocationStrategy are used for a given environment.
+ExperimentTracker, and InferenceStrategy are used for a given environment.
 
 The ``extra`` dict is forwarded to every factory so that environment-specific
 settings (e.g. ``gcp_project``, ``gcp_location``) can be injected without
@@ -13,7 +13,7 @@ changing factory signatures:
         name="gcp-local",
         storage_factory=_gcs_storage,
         tracker_factory=_vertex_tracker,
-        invocation_strategy_factory=_in_process_invocation,
+        inference_strategy_factory=_in_process_inference,
         extra={"gcp_project": "my-dev-project"},
     )
 """
@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from mlplatform.invocation.base import InvocationStrategy
+from mlplatform.inference.base import InferenceStrategy
 from mlplatform.storage.base import Storage
 from mlplatform.tracking.base import ExperimentTracker
 
@@ -40,7 +40,7 @@ class Profile:
     name: str
     storage_factory: Callable[[str, dict[str, Any]], Storage]
     tracker_factory: Callable[[str, dict[str, Any]], ExperimentTracker]
-    invocation_strategy_factory: Callable[[], InvocationStrategy]
+    inference_strategy_factory: Callable[[], InferenceStrategy]
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -94,19 +94,19 @@ def _vertex_tracker(bp: str, extra: dict[str, Any]) -> ExperimentTracker:
     )
 
 
-def _in_process_invocation() -> InvocationStrategy:
-    from mlplatform.invocation.in_process import InProcessInvocation
-    return InProcessInvocation()
+def _in_process_inference() -> InferenceStrategy:
+    from mlplatform.inference.in_process import InProcessInference
+    return InProcessInference()
 
 
-def _spark_batch_invocation() -> InvocationStrategy:
-    from mlplatform.invocation.spark_batch import SparkBatchInvocation
-    return SparkBatchInvocation()
+def _spark_batch_inference() -> InferenceStrategy:
+    from mlplatform.inference.spark_batch import SparkBatchInference
+    return SparkBatchInference()
 
 
-def _fastapi_invocation() -> InvocationStrategy:
-    from mlplatform.invocation.fastapi_serving import FastAPIInvocation
-    return FastAPIInvocation()
+def _fastapi_inference() -> InferenceStrategy:
+    from mlplatform.inference.fastapi_serving import FastAPIInference
+    return FastAPIInference()
 
 
 # ---------------------------------------------------------------------------
@@ -117,21 +117,21 @@ register_profile(Profile(
     name="local",
     storage_factory=_local_storage,
     tracker_factory=_local_json_tracker,
-    invocation_strategy_factory=_in_process_invocation,
+    inference_strategy_factory=_in_process_inference,
 ))
 
 register_profile(Profile(
     name="local-spark",
     storage_factory=_local_storage,
     tracker_factory=_local_json_tracker,
-    invocation_strategy_factory=_spark_batch_invocation,
+    inference_strategy_factory=_spark_batch_inference,
 ))
 
 register_profile(Profile(
     name="cloud-batch-emulated",
     storage_factory=_local_storage,
     tracker_factory=_local_json_tracker,
-    invocation_strategy_factory=_spark_batch_invocation,
+    inference_strategy_factory=_spark_batch_inference,
 ))
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ register_profile(Profile(
 #       name="gcp-local",
 #       storage_factory=_gcs_storage,
 #       tracker_factory=_vertex_tracker,
-#       invocation_strategy_factory=_in_process_invocation,
+#       inference_strategy_factory=_in_process_inference,
 #       extra={"gcp_project": "my-dev-project"},
 #   ))
 # ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ register_profile(Profile(
     name="cloud-batch",
     storage_factory=_gcs_storage,
     tracker_factory=_vertex_tracker,
-    invocation_strategy_factory=_spark_batch_invocation,
+    inference_strategy_factory=_spark_batch_inference,
     extra=_GCP_DEFAULTS,
 ))
 
@@ -173,7 +173,7 @@ register_profile(Profile(
     name="cloud-online",
     storage_factory=_gcs_storage,
     tracker_factory=_vertex_tracker,
-    invocation_strategy_factory=_fastapi_invocation,
+    inference_strategy_factory=_fastapi_inference,
     extra=_GCP_DEFAULTS,
 ))
 
@@ -181,6 +181,6 @@ register_profile(Profile(
     name="cloud-train",
     storage_factory=_gcs_storage,
     tracker_factory=_vertex_tracker,
-    invocation_strategy_factory=_in_process_invocation,
+    inference_strategy_factory=_in_process_inference,
     extra=_GCP_DEFAULTS,
 ))

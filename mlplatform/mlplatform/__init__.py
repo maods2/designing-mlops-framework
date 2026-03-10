@@ -1,14 +1,15 @@
 """MLOps platform — public API for v0.1.x.
 
-In this release the public API consists of three sub-packages:
+In this release the public API consists of four sub-packages:
 
-* :mod:`mlplatform.utils` — serialisation helpers and storage upload utilities.
 * :mod:`mlplatform.config` — Pydantic-validated configuration models for
   training, prediction, and pipeline workflows.
 * :mod:`mlplatform.storage` — Storage backends: ``LocalFileSystem`` and
-  ``GCSStorage``.  Requires ``pip install mlplatform[utils]``.
+  ``GCSStorage``.  GCS requires ``pip install mlplatform[storage]``.
+* :mod:`mlplatform.utils` — serialisation helpers and storage upload utilities.
+* :mod:`mlplatform.artifacts` — create ArtifactRegistry from config or explicit params.
 
-Additional modules (tracking, invocation strategies, Spark utilities) exist in
+Additional modules (tracking, inference strategies, Spark utilities) exist in
 the repository and are importable directly, but they are **not part of the
 supported public API** until a future release.
 
@@ -16,11 +17,14 @@ Install
 -------
 .. code-block:: bash
 
-    # utils + storage backends (serialisation, GCS artifact upload):
-    pip install mlplatform[utils]
-
     # Only config (Pydantic schemas + YAML loading):
     pip install mlplatform[config]
+
+    # Storage with GCS backend:
+    pip install mlplatform[storage]
+
+    # Utils + storage (serialisation, GCS artifact upload):
+    pip install mlplatform[utils]
 
     # Everything in the current public API:
     pip install mlplatform[core]
@@ -41,10 +45,11 @@ Quick example
 
 # ── v0.1.x public API ────────────────────────────────────────────────────────
 from mlplatform._version import __version__
-from mlplatform import config, storage, utils
+from mlplatform import artifacts, config, storage, utils
 
 __all__ = [
     "__version__",
+    "artifacts",
     "config",
     "storage",
     "utils",
@@ -60,7 +65,7 @@ __all__ = [
 #     tracking,     # mlplatform[tracking]— ExperimentTracker, LocalJsonTracker,
 #                   #                       VertexAITracker, NoneTracker
 #     spark,        # mlplatform[spark]   — build_root_zip, build_model_package
-#     invocation,   # (no extra needed)   — InvocationStrategy, InProcessInvocation
+#     inference,    # (no extra needed)   — InferenceStrategy, InProcessInference
 #     profiles,     # (no extra needed)   — Profile, get_profile, register_profile
 #     serving,      # mlplatform[serving] — REST inference server (FastAPI)       [planned]
 #     bigquery,     # mlplatform[bigquery]— BigQuery read/write helpers            [planned]

@@ -1,0 +1,5 @@
+# Dev config profile - overrides for trend model training development.
+log_level: DEBUG
+base_path: ./dev_artifacts
+profile: local
+train_data_path: example_model_v2/data/sample_trend.csv

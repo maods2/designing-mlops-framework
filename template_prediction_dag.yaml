@@ -1,23 +1,14 @@
+# Legacy format - top-level models list
 workflow_name: eds_workflow_prediction
-execution_mode: sequential  # Options: sequential, parallel
+execution_mode: sequential
 pipeline_type: prediction
-config_version: 2
 feature_name: eds
+config_version: 1
+config:
+  - global
 models:
   - model_name: lr_p708
-    serving_platform: VertexAI  # Options: Dataproc, VertexAI
-    module: "example_model.predict"
-    model_version: "latest"
-
-    # File-based I/O (used by InProcess and SparkBatch invocations)
-    input_path: "example_model/data/sample_inference.csv"
-    output_path: "artifacts/predictions.csv"
-
-    # BigQuery I/O (used when file paths are absent or by SparkBatch)
-    prediction_dataset_name: dataset_name
-    prediction_table_name: table_name
-    prediction_output_dataset_table: dataset.table_name
-
-    unique_identifier_column: vin
-    optional_configs:
-      prediction_threshold: 0.5
+    module: example_model.predict
+    serving_platform: VertexAI
+    input_path: example_model/data/sample_inference.csv
+    output_path: artifacts/predictions.csv

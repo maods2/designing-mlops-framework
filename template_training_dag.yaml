@@ -1,27 +1,13 @@
+# Legacy format - top-level models list
 workflow_name: eds_workflow_sequential
-execution_mode: sequential  # Options: sequential, parallel
+execution_mode: sequential
 pipeline_type: training
-feature_name: eds  # Vehicle feature abbreviated name (e.g., eds, ol, tsl)
-config_version: 2
+feature_name: eds
+config_version: 1
+config:
+  - global
 models:
-  - model_name: lr_p708  # Unique identifier for this model
-    # Compute size: xs (4 cores, 15GB), s (8 cores, 32GB), m (16 cores, 64GB), l (60 cores, 240GB)
+  - model_name: lr_p708
+    module: example_model.train
     compute: s
-    training_platform: VertexAI # Options: Dataproc, VertexAI
-    module: "example_model.train"
-    optional_configs:
-      test_size: 0.2
-      # Local file fallback (used when bq_params is absent)
-      train_data_path: "example_model/data/sample_train.csv"
-      hyperparameters:
-        max_iter: 1000
-      # BigQuery parameters -- injected into sql/load_training_data.sql.
-      # Uncomment below to load training data from BigQuery instead of CSV.
-      # bq_params:
-      #   project: my-gcp-project
-      #   dataset: my_dataset
-      #   table: training_features
-      #   start_date: "2025-01-01"
-      #   end_date: "2025-12-31"
-      #   sample_fraction: 1.0
-      #   target_column: target
+    training_platform: VertexAI

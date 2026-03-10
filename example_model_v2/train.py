@@ -1,27 +1,24 @@
-"""Training: MyTrainer - simple example for data scientists.
+"""Training: TrendTrainer - simple trend prediction example.
 
 Run locally:
-    python example_model/train.py
+    python example_model_v2/train.py
 
-What you need to change:
-  - FEATURE_COLUMNS in constants.py (your feature column names)
-  - train_data_path in pipeline YAML (path to your CSV)
-  - Model and hyperparameters in the train() method below
+Uses ArtifactRegistry save/load/resolve_path for model and scaler persistence.
 """
 
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from mlplatform.core.trainer import BaseTrainer
 
-import example_model.constants as cons
-from example_model.evaluate import evaluate
+import example_model_v2.constants as cons
+from example_model_v2.evaluate import evaluate
 
 
-class MyTrainer(BaseTrainer):
-    """Train a model, evaluate it, and save artifacts."""
+class TrendTrainer(BaseTrainer):
+    """Train a trend regression model, evaluate it, and save artifacts."""
 
     def train(self) -> None:
         # 1. Load data (CSV path from config, or train_data dict for tests)
@@ -32,7 +29,9 @@ class MyTrainer(BaseTrainer):
                 axis=1,
             )
         else:
-            data_path = self.config.get("train_data_path", "example_model/data/sample_train.csv")
+            data_path = self.config.get(
+                "train_data_path", "example_model_v2/data/sample_trend.csv"
+            )
             df = pd.read_csv(data_path)
         X = df[cons.FEATURE_COLUMNS]
         y = df["target"]
@@ -45,10 +44,8 @@ class MyTrainer(BaseTrainer):
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
 
-        # 3. Train model (change hyperparameters here if needed)
-        hyperparams = self.config.get("hyperparameters", {})
-        max_iter = hyperparams.get("max_iter", 1000)
-        model = LogisticRegression(max_iter=max_iter, random_state=42)
+        # 3. Train model (LinearRegression for trend)
+        model = LinearRegression()
         model.fit(X_train_scaled, y_train)
 
         # 4. Evaluate and log metrics
@@ -57,9 +54,9 @@ class MyTrainer(BaseTrainer):
         metrics = evaluate(model, scaler, val_df)
         self.log.info("Validation metrics: %s", metrics)
         self.tracker.log_metrics(metrics)
-        self.tracker.log_params({"model_type": "LogisticRegression", "max_iter": max_iter})
+        self.tracker.log_params({"model_type": "LinearRegression"})
 
-        # 5. Save model and scaler
+        # 5. Save model and scaler using ArtifactRegistry
         self.artifacts.save(cons.MODEL_ARTIFACT, model)
         self.artifacts.save(cons.SCALER_ARTIFACT, scaler)
 
@@ -67,4 +64,4 @@ class MyTrainer(BaseTrainer):
 if __name__ == "__main__":
     from mlplatform.runner import dev_train
 
-    dev_train("example_model/pipeline/train.yaml")
+    dev_train("example_model_v2/pipeline/train.yaml")

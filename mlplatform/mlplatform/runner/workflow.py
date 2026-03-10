@@ -12,7 +12,7 @@ from mlplatform.config.schema import ModelConfig, WorkflowConfig
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
 from mlplatform.core.trainer import BaseTrainer
-from mlplatform.invocation.base import InvocationStrategy
+from mlplatform.inference.base import InferenceStrategy
 from mlplatform.profiles.registry import get_profile
 from mlplatform.runner.resolve import resolve_class
 from mlplatform.utils.logging import get_logger
@@ -25,6 +25,7 @@ def run_workflow(
     base_path: str | None = None,
     commit_hash: str | None = None,
     config_names: list[str] | None = None,
+    extra_overrides: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Run all models defined in a DAG workflow config.
 
@@ -35,6 +36,8 @@ def run_workflow(
         base_path: Artifact storage base path.
         commit_hash: Git commit hash for reproducibility tracking.
         config_names: Config profile names to merge (overrides DAG ``config:`` key).
+        extra_overrides: Override profile.extra (e.g. gcp_project, bucket) at runtime.
+            Used by orchestrators to inject cloud-specific values.
 
     Returns:
         Dict mapping model_name -> result status ("ok" or "error: <msg>").
@@ -50,14 +53,16 @@ def run_workflow(
 
     results: dict[str, str] = {}
     for model_cfg in workflow.models:
-        ctx = _build_context(workflow, model_cfg, profile, version, base_path, commit_hash)
+        ctx = _build_context(
+            workflow, model_cfg, profile, version, base_path, commit_hash, extra_overrides
+        )
         _log_framework_params(ctx, profile)
         try:
             if workflow.pipeline_type == "training":
                 _run_training(model_cfg, ctx)
             else:
-                invocation = prof.invocation_strategy_factory()
-                _run_prediction(model_cfg, ctx, invocation)
+                inference = prof.inference_strategy_factory()
+                _run_prediction(model_cfg, ctx, inference)
             results[model_cfg.model_name] = "ok"
         except Exception as exc:
             ctx.log.error("Model '%s' failed: %s", model_cfg.model_name, exc)
@@ -78,19 +83,47 @@ def _build_context(
     version: str,
     base_path: str | None,
     commit_hash: str | None = None,
+    extra_overrides: dict[str, Any] | None = None,
 ) -> ExecutionContext:
     prof = get_profile(profile)
+    resolved_base_path = _resolve_base_path(
+        profile=profile,
+        base_path_override=base_path,
+        optional_configs=model_cfg.optional_configs,
+    )
     return ExecutionContext.from_profile(
         profile=prof,
         feature_name=workflow.feature_name,
         model_name=model_cfg.model_name,
         version=version,
-        base_path=base_path or "./artifacts",
+        base_path=resolved_base_path,
         pipeline_type=workflow.pipeline_type,
         log_level=workflow.log_level,
         optional_configs=model_cfg.optional_configs,
         commit_hash=commit_hash,
+        extra_overrides=extra_overrides,
     )
+
+
+def _resolve_base_path(
+    profile: str,
+    base_path_override: str | None,
+    optional_configs: dict[str, Any],
+) -> str:
+    """Resolve storage base path from override or config.
+
+    For cloud (GCS) profiles, builds gs://{bucket}/{prefix} from config when
+    bucket is present. Otherwise uses base_path_override or default.
+    """
+    if base_path_override:
+        return base_path_override
+    is_gcs = profile in ("cloud-batch", "cloud-online", "cloud-train")
+    if is_gcs and optional_configs.get("bucket"):
+        bucket = optional_configs["bucket"]
+        artifact_prefix = optional_configs.get("artifact_prefix", "models")
+        prefix = artifact_prefix.rstrip("/") if artifact_prefix else ""
+        return f"gs://{bucket}/{prefix}" if prefix else f"gs://{bucket}"
+    return optional_configs.get("base_path", "./artifacts")
 
 
 def _log_framework_params(ctx: ExecutionContext, profile: str) -> None:
@@ -121,13 +154,13 @@ def _run_training(model_cfg: ModelConfig, ctx: ExecutionContext) -> None:
 def _run_prediction(
     model_cfg: ModelConfig,
     ctx: ExecutionContext,
-    invocation: InvocationStrategy,
+    inference: InferenceStrategy,
 ) -> Any:
     predictor_cls = resolve_class(model_cfg.module, BasePredictor)
     predictor = predictor_cls()
     predictor.context = ctx
     predictor.setup()
     try:
-        return invocation.invoke(predictor, ctx, model_cfg)
+        return inference.invoke(predictor, ctx, model_cfg)
     finally:
         predictor.teardown()

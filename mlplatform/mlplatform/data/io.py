@@ -1,6 +1,6 @@
 """Prediction data loading and writing utilities.
 
-Invocation strategies delegate to these functions rather than implementing
+Inference strategies delegate to these functions rather than implementing
 I/O themselves. Supports CSV, Parquet, and BigQuery sources.
 """
 
@@ -15,7 +15,7 @@ import pandas as pd
 if TYPE_CHECKING:
     from mlplatform.config.schema import ModelConfig
 
-log = logging.getLogger("mlplatform.data_io")
+log = logging.getLogger("mlplatform.data.io")
 
 
 def load_prediction_input(model_cfg: ModelConfig) -> pd.DataFrame:

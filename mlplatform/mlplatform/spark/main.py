@@ -153,9 +153,9 @@ def _run_spark_inference(
     input_path: str | None = None,
     output_path: str | None = None,
 ) -> None:
-    """Run distributed inference via SparkBatchInvocation."""
+    """Run distributed inference via SparkBatchInference."""
     from mlplatform.core.predictor import BasePredictor
-    from mlplatform.invocation.spark_batch import SparkBatchInvocation
+    from mlplatform.inference.spark_batch import SparkBatchInference
 
     ctx = _build_context_from_config(config)
     _log_framework_params(ctx, config)
@@ -164,8 +164,8 @@ def _run_spark_inference(
     predictor = predictor_cls()
     predictor.context = ctx
 
-    invocation = SparkBatchInvocation()
-    invocation.invoke(predictor, ctx, model_cfg)
+    inference = SparkBatchInference()
+    inference.invoke(predictor, ctx, model_cfg)
 
 
 def main() -> int:

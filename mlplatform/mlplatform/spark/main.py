@@ -92,7 +92,7 @@ def _build_model_cfg_from_config(
     output_path: str | None = None,
 ):
     """Reconstruct a ModelConfig from the serialized runtime config."""
-    from mlplatform.config.schema import ModelConfig
+    from mlplatform.config.models import ModelConfig
 
     runtime = config.get("runtime_config", {})
     return ModelConfig(

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 if TYPE_CHECKING:
-    from mlplatform.config.schema import ModelConfig
+    from mlplatform.config.models import ModelConfig
 
 log = logging.getLogger("mlplatform.data.io")
 

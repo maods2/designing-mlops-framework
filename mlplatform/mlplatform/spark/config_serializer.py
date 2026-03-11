@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mlplatform.config.schema import ModelConfig, WorkflowConfig
+from mlplatform.config.models import ModelConfig, WorkflowConfig
 
 
 def workflow_config_to_dict(

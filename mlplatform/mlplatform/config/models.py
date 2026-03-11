@@ -1,12 +1,8 @@
 """Pydantic-based configuration models for training, prediction, and pipelines.
 
-These models wrap and extend the underlying dataclass-based schema
-(:mod:`mlplatform.config.schema`) with:
-
-* **Input validation** via Pydantic v2
-* **Computed fields** that derive useful properties from combinations of
-  provided parameters
-* **YAML loading** via :meth:`PipelineConfig.from_yaml`
+* **ModelConfig** / **WorkflowConfig** — base types returned by the YAML loader.
+* **TrainingConfig** / **PredictionConfig** — validated models with computed fields.
+* **PipelineConfig** — full workflow; use :meth:`PipelineConfig.from_yaml` to load.
 
 Install
 -------
@@ -41,6 +37,71 @@ from pathlib import Path
 from typing import Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+
+# ---------------------------------------------------------------------------
+# ModelConfig / WorkflowConfig (loader output types)
+# ---------------------------------------------------------------------------
+
+
+class ModelConfig(BaseModel):
+    """Configuration for a single model within a workflow.
+
+    Unified schema supporting both training and prediction DAG entries.
+    Returned by :func:`~mlplatform.config.loader.load_workflow_config`.
+    """
+
+    model_config = ConfigDict(frozen=False, extra="allow")
+
+    model_name: str = Field(..., description="Unique name identifying this model.")
+    module: str = Field(..., description="Dotted Python import path to the trainer/predictor module.")
+    compute: str = Field("s", description="Compute size hint (e.g. 's', 'm', 'l').")
+    platform: str = Field("VertexAI", description="Target platform.")
+    optional_configs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Freeform key-value pairs passed through to trainer/predictor code.",
+    )
+    prediction_dataset_name: str | None = Field(None, description="BigQuery source dataset.")
+    prediction_table_name: str | None = Field(None, description="BigQuery source table.")
+    model_id: str | None = Field(None, description="Registry model ID (e.g. Vertex AI model ID).")
+    model_version: str = Field("latest", description="Artifact version label.")
+    prediction_output_dataset_table: str | None = Field(
+        None, description="BigQuery destination table for predictions (dataset.table)."
+    )
+    predicted_label_column_name: str | None = Field(None, description="Output column for predicted label.")
+    predicted_timestamp_column_name: str | None = Field(
+        None, description="Output column for prediction timestamp."
+    )
+    predicted_probability_column_name: str | None = Field(
+        None, description="Output column for prediction probability."
+    )
+    unique_identifier_column: str | None = Field(
+        None, description="Column used to join predictions back to source rows."
+    )
+    input_path: str | None = Field(None, description="File path or GCS URI to the input dataset.")
+    output_path: str | None = Field(None, description="File path or GCS URI for output.")
+
+
+class WorkflowConfig(BaseModel):
+    """Full workflow configuration parsed from a DAG YAML template.
+
+    Returned by :func:`~mlplatform.config.loader.load_workflow_config`.
+    """
+
+    model_config = ConfigDict(frozen=False)
+
+    workflow_name: str = Field(..., description="Human-readable name for this pipeline.")
+    execution_mode: str = Field("sequential", description="How tasks are scheduled.")
+    pipeline_type: str = Field("training", description="Whether this pipeline trains or runs inference.")
+    feature_name: str = Field(..., description="Feature domain name used to namespace artifacts.")
+    config_version: int = Field(2, description="DAG template format version.")
+    models: list[ModelConfig] = Field(
+        default_factory=list, description="Per-model configurations in pipeline order."
+    )
+    log_level: str = Field("INFO", description="Logging verbosity level.")
+    config_profiles: list[str] = Field(
+        default_factory=list, description="Config profile names that were merged."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -105,10 +166,10 @@ class TrainingConfig(BaseModel):
         model_config: Any,
         feature_name: str | None = None,
     ) -> "TrainingConfig":
-        """Create a ``TrainingConfig`` from an existing :class:`~mlplatform.config.schema.ModelConfig`.
+        """Create a ``TrainingConfig`` from an existing :class:`~mlplatform.config.models.ModelConfig`.
 
         Args:
-            model_config: A :class:`~mlplatform.config.schema.ModelConfig` instance.
+            model_config: A :class:`~mlplatform.config.models.ModelConfig` instance.
             feature_name: Feature domain name (taken from the parent workflow).
         """
         return cls(
@@ -236,10 +297,10 @@ class PredictionConfig(BaseModel):
         model_config: Any,
         feature_name: str | None = None,
     ) -> "PredictionConfig":
-        """Create a ``PredictionConfig`` from an existing :class:`~mlplatform.config.schema.ModelConfig`.
+        """Create a ``PredictionConfig`` from an existing :class:`~mlplatform.config.models.ModelConfig`.
 
         Args:
-            model_config: A :class:`~mlplatform.config.schema.ModelConfig` instance.
+            model_config: A :class:`~mlplatform.config.models.ModelConfig` instance.
             feature_name: Feature domain name (taken from the parent workflow).
         """
         return cls(
@@ -335,7 +396,7 @@ class PipelineConfig(BaseModel):
         """Load and validate a ``PipelineConfig`` from a DAG YAML file.
 
         Wraps :func:`~mlplatform.config.loader.load_workflow_config` and
-        converts the resulting :class:`~mlplatform.config.schema.WorkflowConfig`
+        converts the resulting :class:`~mlplatform.config.models.WorkflowConfig`
         into a fully validated ``PipelineConfig`` with Pydantic.
 
         Args:

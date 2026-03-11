@@ -15,8 +15,8 @@ VERSION="local_$(date +%Y%m%d_%H%M%S)"
 BASE_PATH="${REPO_ROOT}/artifacts_local_run"
 DIST_DIR="${REPO_ROOT}/dist_local_run"
 
-TRAIN_DAG="${REPO_ROOT}/template_training_dag.yaml"
-PREDICT_DAG="${REPO_ROOT}/template_prediction_dag.yaml"
+TRAIN_DAG="${REPO_ROOT}/mlplatform/tests/fixtures/legacy_training_dag.yaml"
+PREDICT_DAG="${REPO_ROOT}/mlplatform/tests/fixtures/legacy_prediction_dag.yaml"
 
 cleanup() {
     echo ""

@@ -18,6 +18,7 @@ example_model/artifacts
 
 # *.csv
 artifacts/predictions.csv
+test_dist/
 
 # Generated output from examples/
 examples/output/

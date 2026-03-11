@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from mlplatform.inference.base import InferenceStrategy
 
 if TYPE_CHECKING:
-    from mlplatform.config.schema import ModelConfig
+    from mlplatform.config.models import ModelConfig
     from mlplatform.core.context import ExecutionContext
     from mlplatform.core.predictor import BasePredictor
 

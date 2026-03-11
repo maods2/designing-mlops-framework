@@ -22,12 +22,12 @@ def repo_root() -> Path:
 
 @pytest.fixture(scope="session")
 def legacy_train_dag_path(repo_root: Path) -> Path:
-    return repo_root / "template_training_dag.yaml"
+    return repo_root / "mlplatform" / "tests" / "fixtures" / "legacy_training_dag.yaml"
 
 
 @pytest.fixture(scope="session")
 def legacy_predict_dag_path(repo_root: Path) -> Path:
-    return repo_root / "template_prediction_dag.yaml"
+    return repo_root / "mlplatform" / "tests" / "fixtures" / "legacy_prediction_dag.yaml"
 
 
 @pytest.fixture(scope="session")

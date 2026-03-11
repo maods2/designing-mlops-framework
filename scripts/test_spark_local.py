@@ -42,7 +42,7 @@ def test_run_spark_main_direct():
     root_zip = monorepo_root / "test_dist" / "root.zip"
 
     # Load config and write run_config for Spark main.py
-    dag_path = monorepo_root / "template_training_dag.yaml"
+    dag_path = monorepo_root / "mlplatform" / "tests" / "fixtures" / "legacy_training_dag.yaml"
     workflow = load_workflow_config(dag_path, config_dir=model_root / "config")
     model_cfg = workflow.models[0]
 

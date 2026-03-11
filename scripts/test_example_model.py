@@ -17,7 +17,7 @@ def test_run_training_workflow():
     from mlplatform.runner import run_workflow, _build_context
     from mlplatform.config.loader import load_workflow_config
 
-    dag_path = monorepo_root / "template_training_dag.yaml"
+    dag_path = monorepo_root / "example_model" / "tests" / "fixtures" / "legacy_training_dag.yaml"
     workflow = load_workflow_config(dag_path)
 
     X, y = make_classification(n_samples=50, n_features=5, random_state=42)
@@ -47,7 +47,7 @@ def test_run_prediction():
     from mlplatform.config.loader import load_workflow_config
     from mlplatform.runner import _build_context
 
-    dag_path = monorepo_root / "template_prediction_dag.yaml"
+    dag_path = monorepo_root / "example_model" / "tests" / "fixtures" / "legacy_prediction_dag.yaml"
     workflow = load_workflow_config(dag_path)
     model_cfg = workflow.models[0]
 
@@ -87,7 +87,7 @@ def test_config_serializer():
     from mlplatform.config.loader import load_workflow_config
     from mlplatform.spark.config_serializer import write_workflow_config
 
-    dag_path = monorepo_root / "template_training_dag.yaml"
+    dag_path = monorepo_root / "example_model" / "tests" / "fixtures" / "legacy_training_dag.yaml"
     workflow = load_workflow_config(dag_path)
     model_cfg = workflow.models[0]
 
@@ -112,7 +112,7 @@ def test_pyspark_batch_prediction():
 
     artifacts_dir = monorepo_root / "test_artifacts"
 
-    dag_pred = load_workflow_config(monorepo_root / "template_prediction_dag.yaml")
+    dag_pred = load_workflow_config(monorepo_root / "example_model" / "tests" / "fixtures" / "legacy_prediction_dag.yaml")
     pred_model = dag_pred.models[0]
     config_path = monorepo_root / "test_dist" / "spark_pred_config.json"
     write_workflow_config(dag_pred, pred_model, config_path, base_path=str(artifacts_dir), version="test_v1")

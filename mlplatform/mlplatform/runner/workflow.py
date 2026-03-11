@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mlplatform.config.loader import load_workflow_config
-from mlplatform.config.schema import ModelConfig, WorkflowConfig
+from mlplatform.config.models import ModelConfig, WorkflowConfig
 from mlplatform.core.context import ExecutionContext
 from mlplatform.core.predictor import BasePredictor
 from mlplatform.core.trainer import BaseTrainer

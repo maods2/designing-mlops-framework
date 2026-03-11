@@ -41,7 +41,7 @@ from typing import Any
 
 import yaml
 
-from mlplatform.config.schema import ModelConfig, WorkflowConfig
+from mlplatform.config.models import ModelConfig, WorkflowConfig
 
 
 # ---------------------------------------------------------------------------

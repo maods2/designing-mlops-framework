@@ -137,10 +137,12 @@ my_project/
   mlplatform/                     # Framework package
     mlplatform/
       _version.py                 # Single source of truth for package version
-      config/                     # Pydantic config models + YAML loader + schema
-        models.py                 # TrainingConfig, PredictionConfig, PipelineConfig
+      config/                     # Pydantic config models + YAML loader
+        models.py                 # ModelConfig, WorkflowConfig, TrainingConfig, PredictionConfig, PipelineConfig
         loader.py
-        schema.py
+      artifacts/                 # Standalone artifact storage
+        core.py                   # create_artifacts, ArtifactConfig
+        __init__.py               # Re-exports
       utils/                      # Reusable utility helpers
         serialization.py          # sanitize(), to_serializable()
         storage_helpers.py        # save_plot(), save_html()
@@ -595,7 +597,7 @@ mlplatform run --dag template_training_dag.yaml
 mlplatform run --dag template_training_dag.yaml --version v1.0 --base-path ./my_artifacts
 
 # Prediction
-mlplatform run --dag template_prediction_dag.yaml --version v1.0 --base-path ./my_artifacts
+mlplatform run --dag mlplatform/tests/fixtures/legacy_prediction_dag.yaml --version v1.0 --base-path ./my_artifacts
 ```
 
 ### Via Python
@@ -607,7 +609,7 @@ from mlplatform.runner import run_workflow
 results = run_workflow("template_training_dag.yaml", version="v1.0", base_path="./artifacts")
 
 # Prediction (use the same version and base_path as training)
-results = run_workflow("template_prediction_dag.yaml", version="v1.0", base_path="./artifacts")
+results = run_workflow("mlplatform/tests/fixtures/legacy_prediction_dag.yaml", version="v1.0", base_path="./artifacts")
 ```
 
 ### Direct execution (debug mode)
@@ -637,7 +639,7 @@ if __name__ == "__main__":
 # predict.py
 if __name__ == "__main__":
     from mlplatform.runner import dev_predict
-    result = dev_predict("template_prediction_dag.yaml")
+    result = dev_predict("mlplatform/tests/fixtures/legacy_prediction_dag.yaml")
     print(result)
 ```
 
@@ -674,7 +676,7 @@ mlplatform run --dag template_training_dag.yaml --version v1.0 --base-path ./art
 from mlplatform.config.loader import load_workflow_config
 from mlplatform.spark.config_serializer import write_workflow_config
 
-workflow = load_workflow_config("template_prediction_dag.yaml")
+workflow = load_workflow_config("mlplatform/tests/fixtures/legacy_prediction_dag.yaml")
 model_cfg = workflow.models[0]
 write_workflow_config(workflow, model_cfg, "dist/spark_config.json",
                       base_path="./artifacts", version="v1.0")

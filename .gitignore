@@ -17,7 +17,7 @@ example_model/artifacts
 **/dist/
 
 # *.csv
-artifacts/
+artifacts/predictions.csv
 
 # Generated output from examples/
 examples/output/

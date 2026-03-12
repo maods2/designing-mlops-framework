@@ -1,0 +1,14 @@
+# Legacy format - top-level models list
+workflow_name: eds_workflow_prediction
+execution_mode: sequential
+pipeline_type: prediction
+feature_name: eds
+config_version: 1
+config:
+  - global
+models:
+  - model_name: lr_p708
+    module: example_model.predict
+    serving_platform: VertexAI
+    input_path: example_model/data/sample_inference.csv
+    output_path: artifacts/predictions.csv

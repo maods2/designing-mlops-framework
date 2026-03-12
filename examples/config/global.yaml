@@ -1,0 +1,5 @@
+# Base config — shared across environments
+model_name: sample_model
+feature: demo
+version: v1
+backend: local

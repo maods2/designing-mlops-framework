@@ -1,6 +1,0 @@
-# Predict-dev config profile - overrides for prediction development.
-log_level: DEBUG
-base_path: ./dev_artifacts
-profile: local
-input_path: example_model_v2/data/sample_inference.csv
-output_path: artifacts/predictions.csv

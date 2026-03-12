@@ -1,0 +1,5 @@
+# Prod overrides — GCS backend (example)
+backend: gcs
+base_bucket: my-ml-bucket
+project_id: my-gcp-project
+version: v1.0

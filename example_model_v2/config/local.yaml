@@ -1,4 +1,0 @@
-# Local config profile - overrides for local development and testing.
-log_level: DEBUG
-base_path: ./local_artifacts
-profile: local

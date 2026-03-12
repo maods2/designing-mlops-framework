@@ -1,6 +1,0 @@
-# GCS config profile - use with cloud-batch, cloud-online, or cloud-train profiles.
-log_level: INFO
-base_path: ./artifacts
-bucket: my-artifact-bucket
-artifact_prefix: models
-gcp_project: my-gcp-project

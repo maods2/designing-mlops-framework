@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlplatform"
+dynamic = ["version"]
+description = "Production-ready MLOps platform with pluggable backends"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pyyaml>=6.0",
+    "pandas>=1.0",
+    "joblib>=1.0",
+]
+
+[project.optional-dependencies]
+# ── v0.1.x public API ────────────────────────────────────────────────────────
+# Atomic extras: install only the deps each sub-package actually needs.
+utils = [
+    # Serialisation helpers (sanitize, to_serializable) have no extra deps.
+    # Storage helpers (save_plot, save_html) need matplotlib + GCS client.
+    "matplotlib>=3.5",
+    "google-cloud-storage>=2.0",
+]
+config = [
+    # Pydantic v2 for TrainingConfig / PredictionConfig / RunConfig.
+    "pydantic>=2.0",
+]
+storage = [
+    # GCS backend for artifact persistence.
+    "google-cloud-storage>=2.0",
+]
+
+# Meta-extras: compose from atomic extras above — no version pins are repeated.
+core = [
+    "mlplatform[utils,config]",
+]
+
+# ── future extras (not yet part of the public API) ───────────────────────────
+tracking = [
+    "google-cloud-aiplatform>=1.0",
+]
+spark = [
+    "pyspark>=3.0",
+    "pyarrow>=10.0",       # required by mapInPandas and Spark <-> pandas interchange
+]
+serving = [
+    "fastapi>=0.100",
+    "uvicorn>=0.22",
+]
+bigquery = [
+    "google-cloud-bigquery>=3.0",
+    "pyarrow>=10.0",       # required by the BigQuery Storage Read API
+]
+parquet = [
+    "pyarrow>=10.0",
+]
+
+# Meta-extra: everything — useful for CI and integration test environments.
+all = [
+    "mlplatform[core,tracking,spark,serving,bigquery]",
+]
+
+# ── development ───────────────────────────────────────────────────────────────
+dev = [
+    "mlplatform[core]",    # includes all public-API deps; no version pins repeated
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+    "bump-my-version>=1.0.0",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "mlplatform._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mlplatform*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.bumpversion]
+current_version = "0.1.0"
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+serialize = ["{major}.{minor}.{patch}"]
+commit = true
+tag = true
+tag_name = "v{new_version}"
+message = "chore: bump version to {new_version}"
+
+[[tool.bumpversion.files]]
+filename = "mlplatform/_version.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'

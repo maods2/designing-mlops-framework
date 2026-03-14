@@ -1,7 +1,7 @@
-"""Prediction: MyPredictor - simple example for data scientists.
+"""Prediction: MyPredictor — config-driven, no DAG dependency.
 
 Run locally:
-    python example_model/predict.py
+    python -m model_code.predict
 
 What you need to change:
   - FEATURE_COLUMNS in constants.py (must match training)
@@ -26,7 +26,6 @@ class MyPredictor(BasePredictor):
 
     def predict(self, data):
         """Run prediction. Returns input DataFrame with a 'prediction' column added."""
-
         df = pd.DataFrame(data) if not isinstance(data, pd.DataFrame) else data
         X = df[cons.FEATURE_COLUMNS]
         X_scaled = self._scaler.transform(X)
@@ -35,18 +34,16 @@ class MyPredictor(BasePredictor):
 
 
 if __name__ == "__main__":
+    from mlplatform.config.models import PipelineConfig
     from mlplatform.runner import dev_predict
-    from mlplatform.model import PipelineConfig
-    
-    config = PipelineConfig.from_dict({
-    "model_name": "example_model",
-    "feature": "churn",
-    "version": "1.0.0",
-    "pipeline_type": "prediction",
-    "config_list":["global", "dev"],
-    "bucket_name": "base-bucket",''
-    "project_id": "base-project",
-    })
 
+    config = PipelineConfig.from_dict({
+        "model_name": "churn_model",
+        "feature": "churn",
+        "pipeline_type": "prediction",
+        "module": "model_code.predict:MyPredictor",
+        "config_list": ["global", "dev"],
+        "config_dir": "model_code/config",
+    })
     result = dev_predict(config)
     print(result)

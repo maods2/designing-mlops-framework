@@ -90,6 +90,11 @@ class ArtifactRegistry:
         self._model_name = model_name
         self._version = version
 
+    @property
+    def storage(self) -> Storage:
+        """Direct access to the underlying Storage backend."""
+        return self._storage
+
     def save(self, name: str, obj: Any) -> None:
         """Save an object. Format inferred from path extension and object type.
 
@@ -106,9 +111,20 @@ class ArtifactRegistry:
         else:
             self._storage.save(path, data)
 
-    def load(self, name: str) -> Any:
-        """Load an object. JSON files are parsed to dict; others returned as-is."""
-        path = _resolve_path(self._feature_name, self._model_name, self._version, name)
+    def load(
+        self,
+        name: str,
+        *,
+        model_name: str | None = None,
+        version: str | None = None,
+    ) -> Any:
+        """Load an object. JSON files are parsed to dict; others returned as-is.
+
+        Override *model_name*/*version* for cross-model loading (e.g., ensembles).
+        """
+        m = model_name or self._model_name
+        v = version or self._version
+        path = _resolve_path(self._feature_name, m, v, name)
         raw = self._storage.load(path)
         return _deserialize_for_load(name, raw, _ext(name))
 

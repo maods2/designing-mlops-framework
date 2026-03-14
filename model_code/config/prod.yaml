@@ -1,0 +1,10 @@
+# Prod config profile - cloud deployment settings.
+backend: gcs
+base_bucket: ml-artifacts-prod
+project_id: my-gcp-project
+profile: cloud-train
+log_level: INFO
+
+hyperparameters:
+  max_iter: 2000
+  random_state: 42

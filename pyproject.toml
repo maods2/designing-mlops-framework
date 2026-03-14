@@ -71,6 +71,9 @@ dev = [
     "bump-my-version>=1.0.0",
 ]
 
+[project.scripts]
+mlplatform = "mlplatform.cli.main:main"
+
 [tool.setuptools.dynamic]
 version = {attr = "mlplatform._version.__version__"}
 

@@ -1,10 +1,8 @@
 # Global config profile - baseline settings applied to all environments.
 # Load order: global is first, later profiles (dev, local, prod) override.
-log_level: INFO
+model_name: churn_model
+feature: churn
 base_path: ./artifacts
+backend: local
+log_level: INFO
 profile: local
-
-# Optional: for GCS storage (when using cloud-* profiles)
-# bucket: my-artifact-bucket
-# artifact_prefix: models
-# gcp_project: my-gcp-project

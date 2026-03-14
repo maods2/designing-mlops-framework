@@ -63,3 +63,36 @@ def load_config_profiles(
     """
     path = Path(config_dir) if isinstance(config_dir, str) else config_dir
     return _load_config_profiles(profile_names, path)
+
+
+def load_model_config(
+    config_list: list[str] | None = None,
+    config_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Load and merge model config from YAML profiles.
+
+    Resolution order for *config_list*:
+
+    1. ``config_list`` param (if provided)
+    2. ``MLPLATFORM_CONFIG`` env var (e.g. ``"global,dev"``)
+    3. Default: ``["global", "dev"]``
+
+    Resolution order for *config_dir*:
+
+    1. ``config_dir`` param (if provided)
+    2. ``MLPLATFORM_CONFIG_DIR`` env var
+    3. Default: ``"./config"``
+
+    Example::
+
+        cfg = load_model_config()
+        training_cfg = TrainingConfig(cfg)
+    """
+    import os
+
+    resolved_list = config_list or [
+        n.strip()
+        for n in os.environ.get("MLPLATFORM_CONFIG", "global,dev").split(",")
+    ]
+    resolved_dir = config_dir or os.environ.get("MLPLATFORM_CONFIG_DIR", "./config")
+    return load_config_profiles(resolved_list, resolved_dir)

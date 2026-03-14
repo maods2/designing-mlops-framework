@@ -1,11 +1,11 @@
-"""Training: MyTrainer - simple example for data scientists.
+"""Training: MyTrainer — config-driven, no DAG dependency.
 
 Run locally:
-    python example_model/train.py
+    python -m model_code.train
 
 What you need to change:
   - FEATURE_COLUMNS in constants.py (your feature column names)
-  - train_data_path in pipeline YAML (path to your CSV)
+  - train_data_path in config/dev.yaml (path to your CSV)
   - Model and hyperparameters in the train() method below
 """
 
@@ -16,12 +16,12 @@ from sklearn.preprocessing import StandardScaler
 
 from mlplatform.core.trainer import BaseTrainer
 
-import example_model.constants as cons
-from example_model.evaluate import evaluate
+import model_code.constants as cons
+from model_code.evaluate import evaluate
 
 
 class MyTrainer(BaseTrainer):
-    """Train a model, evaluate it, and save artifacts."""
+    """Train a model from merged config template."""
 
     def train(self) -> None:
         # 1. Load data (CSV path from config, or train_data dict for tests)
@@ -32,7 +32,7 @@ class MyTrainer(BaseTrainer):
                 axis=1,
             )
         else:
-            data_path = self.config.get("train_data_path", "example_model/data/sample_train.csv")
+            data_path = self.config.get("train_data_path", "model_code/data/sample_train.csv")
             df = pd.read_csv(data_path)
         X = df[cons.FEATURE_COLUMNS]
         y = df["target"]
@@ -45,7 +45,7 @@ class MyTrainer(BaseTrainer):
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
 
-        # 3. Train model (change hyperparameters here if needed)
+        # 3. Train model
         hyperparams = self.config.get("hyperparameters", {})
         max_iter = hyperparams.get("max_iter", 1000)
         model = LogisticRegression(max_iter=max_iter, random_state=42)
@@ -65,18 +65,16 @@ class MyTrainer(BaseTrainer):
 
 
 if __name__ == "__main__":
+    from mlplatform.config.models import PipelineConfig
     from mlplatform.runner import dev_train
-    from mlplatform.model import PipelineConfig
-    from mlplatform.utils import random_version
-    
-    config = PipelineConfig.from_dict({
-    "model_name": "churn_model",
-    "feature": "churn",
-    "pipeline_type": "training",
-    "config_list":["global", "dev"],
-    "version": random_version(),
-    "bucket_name": "base-bucket",
-    "project_id": "base-project",
-    })
 
+    # Config from template — no DAG, no scattered args
+    config = PipelineConfig.from_dict({
+        "model_name": "churn_model",
+        "feature": "churn",
+        "pipeline_type": "training",
+        "module": "model_code.train:MyTrainer",
+        "config_list": ["global", "dev"],
+        "config_dir": "model_code/config",
+    })
     dev_train(config)

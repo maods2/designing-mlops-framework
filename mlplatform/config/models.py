@@ -209,3 +209,115 @@ class RunConfig(BaseModel):
             "backend": self.backend,
             "project_id": self.project_id,
         }
+
+
+class PipelineConfig(BaseModel):
+    """Frozen, validated configuration for a single model execution.
+
+    The single config model passed everywhere — replaces scattered args.
+    Construct via :class:`PipelineConfigBuilder`, :meth:`from_dict`, or directly.
+
+    Example::
+
+        config = PipelineConfig(
+            model_name="churn_model",
+            feature="churn",
+            pipeline_type="training",
+        )
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # Identity
+    model_name: str = Field(..., description="Model identifier.")
+    feature: str = Field(..., description="Feature domain (e.g. churn, demo).")
+    version: str = Field("dev", description="Artifact version.")
+
+    # Infrastructure
+    base_path: str = Field("./artifacts", description="Local base path for artifacts.")
+    base_bucket: str | None = Field(None, description="GCS bucket or local path override.")
+    backend: Literal["local", "gcs"] = Field("local", description="Storage backend.")
+    project_id: str | None = Field(None, description="GCP project (for gcs backend).")
+
+    # Pipeline
+    pipeline_type: Literal["training", "prediction"] = Field(
+        "training", description="Whether this executes training or prediction."
+    )
+    profile: str = Field("local", description="Infrastructure profile name.")
+    platform: str = Field("VertexAI", description="Target platform.")
+
+    # Module resolution
+    module: str = Field("", description="Dotted import path, e.g. 'model_code.train:MyTrainer'.")
+
+    # Config loading
+    config_list: list[str] = Field(
+        default_factory=lambda: ["global", "dev"],
+        description="Config profile YAML names to merge.",
+    )
+    config_dir: str = Field("./config", description="Directory containing config profile YAMLs.")
+
+    # Merged user config (from YAML profiles or direct dict)
+    user_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Merged config from YAML profiles or orchestrator overrides.",
+    )
+
+    # Metadata
+    commit_hash: str | None = Field(None, description="Git commit hash for reproducibility.")
+    log_level: str = Field("INFO", description="Logging verbosity level.")
+
+    # Prediction-specific (optional, for InferenceStrategy compatibility)
+    input_path: str | None = Field(None, description="File path or GCS URI for prediction input.")
+    output_path: str | None = Field(None, description="File path or GCS URI for prediction output.")
+    prediction_dataset_name: str | None = Field(None, description="BigQuery source dataset.")
+    prediction_table_name: str | None = Field(None, description="BigQuery source table.")
+    prediction_output_dataset_table: str | None = Field(
+        None, description="BigQuery destination table (dataset.table)."
+    )
+
+    def to_artifact_kwargs(self) -> dict[str, Any]:
+        """Convert to kwargs for Artifact()."""
+        return {
+            "model_name": self.model_name,
+            "feature": self.feature,
+            "version": self.version,
+            "base_path": self.base_path,
+            "base_bucket": self.base_bucket,
+            "backend": self.backend,
+            "project_id": self.project_id,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "PipelineConfig":
+        """Construct from a flat dict (e.g. orchestrator JSON payload).
+
+        If ``config_list`` and ``config_dir`` are present, loads and merges
+        YAML profiles into ``user_config`` before constructing the frozen model.
+        """
+        from mlplatform.config.loader import load_config_profiles
+
+        data = dict(payload)
+        config_list = data.pop("config_list", None)
+        config_dir = data.pop("config_dir", "./config")
+
+        if config_list:
+            merged = load_config_profiles(config_list, config_dir)
+            # Identity / infra fields in YAML feed into top-level fields
+            _PROMOTE_KEYS = (
+                "model_name", "feature", "version", "base_path",
+                "base_bucket", "backend", "project_id", "profile",
+                "log_level", "platform", "module", "input_path",
+                "output_path", "prediction_dataset_name",
+                "prediction_table_name", "prediction_output_dataset_table",
+            )
+            for key in _PROMOTE_KEYS:
+                if key in merged:
+                    if key not in data:
+                        data[key] = merged[key]
+                    del merged[key]
+            existing_uc = data.get("user_config", {})
+            data["user_config"] = {**merged, **existing_uc}
+
+        data.setdefault("config_list", config_list or ["global", "dev"])
+        data.setdefault("config_dir", config_dir)
+        return cls(**data)

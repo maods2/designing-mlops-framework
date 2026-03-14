@@ -10,7 +10,7 @@ from sklearn.metrics import (
     recall_score,
 )
 
-import example_model.constants as cons
+import model_code.constants as cons
 
 
 def evaluate(
